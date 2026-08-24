@@ -1,6 +1,6 @@
-import { MilestoneState } from "../types"
+import type { MilestoneState } from "../types"
 
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
 
 export async function generateMilestones(notes: string, apiKey: string): Promise<MilestoneState> {
   const response = await fetch(`${API_BASE}?key=${apiKey}`, {

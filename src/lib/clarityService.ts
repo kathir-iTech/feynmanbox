@@ -1,4 +1,4 @@
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
 
 export interface ClarityResult {
   clarity_score: number

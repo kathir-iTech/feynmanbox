@@ -7,7 +7,7 @@ import { rateClarity } from "../lib/clarityService"
 import type { Milestone, ClarityResult } from "../types"
 import { checkCoverage } from "../lib/coverageService"
 
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
 
 export interface MasteryState {
   finalScore: number
@@ -198,7 +198,7 @@ export const MasteryLoop: React.FC<{
     evaluateCoverage,
     evaluateClarity,
     reset,
-  } = useMasteryLoop(milestones, import.meta.env.VITE_GEMINI_API_KEY || "")
+  } = useMasteryLoop(milestones, import.meta.env.VITE_GEMINI_API_KEY)
 
   // Initialize evaluation when transcript changes
   useEffect(() => {

@@ -34,7 +34,7 @@ export const ClarityDisplay: React.FC<{
     setState({ ...state, loading: true })
 
     try {
-      const result: ClarityResult = await rateClarity(transcript, import.meta.env.VITE_GEMINI_API_KEY || "")
+      const result: ClarityResult = await rateClarity(transcript, import.meta.env.VITE_GEMINI_API_KEY)
       const finalClarity = result.is_gaming_attempt ? 0 : result.clarity_score
       setState({
         clarityScore: finalClarity,

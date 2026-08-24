@@ -14,7 +14,7 @@ export const useMilestoneGenerator = () => {
 
   const [apiKey, _setApiKey] = useState(() => {
     // Read from environment variable
-    return import.meta.env.VITE_GEMINI_API_KEY || ""
+    return import.meta.env.VITE_GEMINI_API_KEY
   })
 
   const generate = async (notes: string) => {

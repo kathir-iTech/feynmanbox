@@ -1,11 +1,11 @@
-import { Milestone } from "../types"
+import type { Milestone } from "../types"
 
 export interface CoverageResult {
   milestones_covered: boolean[]
   coverage_score: number
 }
 
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
 
 export async function checkCoverage(
   milestones: Milestone[],

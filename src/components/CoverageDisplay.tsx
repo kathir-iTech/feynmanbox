@@ -76,7 +76,7 @@ export const useCoverageEvaluator = (milestones: Milestone[], apiKey: string) =>
 export const CoverageDisplay: React.FC = () => {
   const { state, evaluate } = useCoverageEvaluator(
     [],
-    import.meta.env.VITE_GEMINI_API_KEY || ""
+    import.meta.env.VITE_GEMINI_API_KEY
   )
 
   return (

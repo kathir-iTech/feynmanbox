@@ -1,5 +1,5 @@
 import { generateMilestones } from "../lib/milestoneService"
-import { MilestoneState } from "../types"
+import type { MilestoneState } from "../types"
 import { useState } from "react"
 
 export const useMilestoneGenerator = () => {
@@ -12,7 +12,7 @@ export const useMilestoneGenerator = () => {
 
   const [apiKey, _setApiKey] = useState(() => {
     // Read from environment variable
-    return import.meta.env.VITE_GEMINI_API_KEY || ""
+    return import.meta.env.VITE_GEMINI_API_KEY
   })
 
   const generate = async (notes: string) => {
