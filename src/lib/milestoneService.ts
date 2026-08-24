@@ -1,4 +1,5 @@
 import type { MilestoneState } from "../types"
+import { parseGeminiJson } from "./parseGeminiJson"
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
 
@@ -13,7 +14,7 @@ export async function generateMilestones(notes: string, apiKey: string): Promise
         {
           parts: [
             {
-              text: `Given these lecture notes: ${notes}, extract exactly 3 key learning milestones a student must be able to explain to prove mastery. Output ONLY valid JSON in this format: {"milestones": ["milestone 1", "milestone 2", "milestone 3"]}`
+              text: `Given these lecture notes: ${notes}, extract exactly 3 key learning milestones a student must be able to explain to prove mastery. Output ONLY valid JSON (no markdown, no code fences) in this format: {"milestones": ["milestone 1", "milestone 2", "milestone 3"]}`
             }
           ]
         }
@@ -31,15 +32,15 @@ export async function generateMilestones(notes: string, apiKey: string): Promise
   }
 
   const data = await response.json()
-  
+
   if (!data.candidates || data.candidates.length === 0) {
     throw new Error("No response from Gemini API")
   }
 
   const text = data.candidates[0].content.parts[0].text
-  
+
   try {
-    const parsed = JSON.parse(text)
+    const parsed = parseGeminiJson<{ milestones: string[] }>(text)
     return {
       success: true,
       milestones: parsed.milestones.map((m: string, i: number) => ({
@@ -50,11 +51,13 @@ export async function generateMilestones(notes: string, apiKey: string): Promise
       error: null,
       loading: false
     }
-  } catch {
+  } catch (parseErr) {
+    console.error("[generateMilestones] Raw Gemini response:", text)
+    console.error("[generateMilestones] Parse error:", parseErr)
     return {
       success: false,
       milestones: [],
-      error: "Failed to parse Gemini response. Please try again.",
+      error: `Failed to parse response. Raw: ${text.substring(0, 200)}`,
       loading: false
     }
   }

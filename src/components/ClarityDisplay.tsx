@@ -37,32 +37,44 @@ export const ClarityDisplay: React.FC<{
     isGaming: boolean
     reasoning: string
     loading: boolean
+    error: string | null
   }>({
     clarityScore: 0,
     isGaming: false,
     reasoning: "",
     loading: false,
+    error: null,
   })
 
+  const inFlightRef = useRef(false)
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
   const evaluate = async () => {
+    if (inFlightRef.current) return
+
     if (!transcript.trim()) {
       setState({
         clarityScore: 0,
         isGaming: false,
         reasoning: "No transcript to evaluate",
         loading: false,
+        error: null,
       })
       return
     }
 
     if (!apiKey) {
-      setState((prev) => ({ ...prev, reasoning: "Gemini API key not configured", loading: false }))
+      setState((prev) => ({
+        ...prev,
+        reasoning: "",
+        error: "Gemini API key not configured. Add VITE_GEMINI_API_KEY in Vercel dashboard.",
+        loading: false,
+      }))
       return
     }
 
-    setState((prev) => ({ ...prev, loading: true }))
+    inFlightRef.current = true
+    setState((prev) => ({ ...prev, loading: true, error: null }))
 
     try {
       const result: ClarityResult = await rateClarity(transcript, apiKey)
@@ -72,18 +84,23 @@ export const ClarityDisplay: React.FC<{
         isGaming: result.is_gaming_attempt,
         reasoning: result.reasoning,
         loading: false,
+        error: null,
       })
 
       if (result.is_gaming_attempt && onNext) {
         onNext()
       }
-    } catch {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unexpected error"
       setState({
         clarityScore: 0,
         isGaming: false,
-        reasoning: "Unexpected error. Please try again.",
+        reasoning: "",
         loading: false,
+        error: message,
       })
+    } finally {
+      inFlightRef.current = false
     }
   }
 
@@ -101,9 +118,9 @@ export const ClarityDisplay: React.FC<{
 
       <button
         onClick={evaluate}
-        disabled={state.loading || !transcript.trim()}
+        disabled={state.loading || !transcript.trim() || !apiKey}
         className={`px-6 py-2 rounded-md font-medium transition-colors ${
-          state.loading || !transcript.trim()
+          state.loading || !transcript.trim() || !apiKey
             ? "bg-slate-200 text-slate-500 cursor-not-allowed"
             : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
         }`}
@@ -118,6 +135,13 @@ export const ClarityDisplay: React.FC<{
           </span>
         ) : "Rate Clarity"}
       </button>
+
+      {state.error && !state.loading && (
+        <div className="mt-4 p-4 rounded-lg border-2 border-red-300 bg-red-50 text-red-800 text-sm">
+          <p className="font-bold mb-1">Clarity evaluation failed</p>
+          <p className="font-mono text-xs break-all">{state.error}</p>
+        </div>
+      )}
 
       {state.isGaming && !state.loading && (
         <div className="mt-6 bg-red-50 border-l-4 border-red-500 p-4 rounded animate-fade-in">

@@ -1,4 +1,5 @@
 import type { ClarityResult } from "../types"
+import { parseGeminiJson } from "./parseGeminiJson"
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
 
@@ -16,7 +17,7 @@ export async function rateClarity(
         {
           parts: [
             {
-              text: `Rate this explanation's clarity from 0-100. Penalize heavily for: excessive unexplained jargon, disconnected keyword-listing without logical flow, missing connective words (because, therefore, consequently, this means). Also return a boolean 'is_gaming_attempt' set to true if the explanation is just a list of terms with no logical sentence structure. Output ONLY valid JSON: {"clarity_score": 0-100, "is_gaming_attempt": true/false, "reasoning": "one sentence explanation"}. Transcript: "${transcript}"`
+              text: `Rate this explanation's clarity from 0-100. Penalize heavily for: excessive unexplained jargon, disconnected keyword-listing without logical flow, missing connective words (because, therefore, consequently, this means). Also return a boolean 'is_gaming_attempt' set to true if the explanation is just a list of terms with no logical sentence structure. Output ONLY valid JSON (no markdown, no code fences): {"clarity_score": 0-100, "is_gaming_attempt": true/false, "reasoning": "one sentence explanation"}. Transcript: "${transcript}"`
             }
           ]
         }
@@ -42,13 +43,15 @@ export async function rateClarity(
   const text = data.candidates[0].content.parts[0].text
 
   try {
-    const parsed = JSON.parse(text)
+    const parsed = parseGeminiJson<{ clarity_score: number; is_gaming_attempt: boolean; reasoning: string }>(text)
     return {
       clarity_score: parsed.clarity_score,
       is_gaming_attempt: parsed.is_gaming_attempt,
       reasoning: parsed.reasoning,
     }
-  } catch {
-    throw new Error("Failed to parse clarity response from Gemini")
+  } catch (parseErr) {
+    console.error("[rateClarity] Raw Gemini response:", text)
+    console.error("[rateClarity] Parse error:", parseErr)
+    throw new Error(`Failed to parse clarity response. Raw: ${text.substring(0, 200)}`)
   }
 }

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { checkCoverage } from "../lib/coverageService"
 import type { Milestone } from "../types"
 
@@ -12,17 +12,29 @@ export const CoverageDisplay: React.FC<{
     coverageScore: number
     loading: boolean
     error: string | null
+    rawResponse: string | null
   }>({
     covered: milestones.map(() => false),
     coverageScore: 0,
     loading: false,
     error: null,
+    rawResponse: null,
   })
 
+  const inFlightRef = useRef(false)
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
   const evaluate = async () => {
-    console.log("[CoverageDisplay] evaluate clicked", { hasTranscript: !!transcript.trim(), hasApiKey: !!apiKey })
+    if (inFlightRef.current) {
+      console.log("[CoverageDisplay] Ignoring click — request already in flight")
+      return
+    }
+
+    console.log("[CoverageDisplay] evaluate clicked", {
+      hasTranscript: !!transcript.trim(),
+      hasApiKey: !!apiKey,
+      transcriptLength: transcript.length,
+    })
 
     if (!transcript.trim()) {
       setState((prev) => ({ ...prev, error: "No transcript to evaluate" }))
@@ -30,24 +42,30 @@ export const CoverageDisplay: React.FC<{
     }
 
     if (!apiKey) {
-      setState((prev) => ({ ...prev, error: "Gemini API key not configured. Add VITE_GEMINI_API_KEY in Vercel dashboard." }))
+      setState((prev) => ({
+        ...prev,
+        error: "Gemini API key not configured. Add VITE_GEMINI_API_KEY in Vercel dashboard settings.",
+        rawResponse: null,
+      }))
       return
     }
 
-    setState((prev) => ({ ...prev, loading: true, error: null }))
+    inFlightRef.current = true
+    setState((prev) => ({ ...prev, loading: true, error: null, rawResponse: null }))
 
     try {
       console.log("[CoverageDisplay] calling checkCoverage...")
       const result = await checkCoverage(milestones, transcript, apiKey)
-      console.log("[CoverageDisplay] result:", result)
+      console.log("[CoverageDisplay] SUCCESS — result:", result)
       setState({
         covered: result.milestones_covered,
         coverageScore: result.coverage_score,
         loading: false,
         error: null,
+        rawResponse: null,
       })
     } catch (err: unknown) {
-      console.error("[CoverageDisplay] error:", err)
+      console.error("[CoverageDisplay] FAILED:", err)
       const message = err instanceof Error ? err.message : "Unexpected error"
       setState((prev) => ({
         ...prev,
@@ -55,7 +73,10 @@ export const CoverageDisplay: React.FC<{
         coverageScore: 0,
         loading: false,
         error: message,
+        rawResponse: null,
       }))
+    } finally {
+      inFlightRef.current = false
     }
   }
 
@@ -70,17 +91,17 @@ export const CoverageDisplay: React.FC<{
       <h2 className="text-xl font-bold text-slate-800 mb-4">Coverage Analysis</h2>
 
       <div className="mb-4">
-        <p className="text-sm text-slate-500 mb-2">Your transcript:</p>
+        <p className="text-sm text-slate-500 mb-2">Your transcript ({transcript.length} chars):</p>
         <div className="w-full border border-slate-200 rounded-lg p-3 bg-slate-50 min-h-[80px] max-h-[150px] overflow-y-auto text-sm text-slate-700">
-          {transcript}
+          {transcript || "(empty)"}
         </div>
       </div>
 
       <button
         onClick={evaluate}
-        disabled={state.loading || !transcript.trim()}
+        disabled={state.loading || !transcript.trim() || !apiKey}
         className={`px-6 py-2 rounded-md font-medium transition-colors ${
-          state.loading || !transcript.trim()
+          state.loading || !transcript.trim() || !apiKey
             ? "bg-slate-200 text-slate-500 cursor-not-allowed"
             : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
         }`}
@@ -93,19 +114,26 @@ export const CoverageDisplay: React.FC<{
             </svg>
             Evaluating...
           </span>
-        ) : "Evaluate Coverage"}
+        ) : !apiKey ? "API Key Not Configured" : "Evaluate Coverage"}
       </button>
 
+      {!apiKey && (
+        <p className="mt-2 text-sm text-amber-600">
+          Add <code className="bg-amber-50 px-1 rounded">VITE_GEMINI_API_KEY</code> in Vercel dashboard Settings → Environment Variables, then redeploy.
+        </p>
+      )}
+
       {state.error && !state.loading && (
-        <div className="mt-4 p-3 rounded bg-red-100 text-red-800 text-sm mb-4">
-          {state.error}
+        <div className="mt-4 p-4 rounded-lg border-2 border-red-300 bg-red-50 text-red-800 text-sm">
+          <p className="font-bold mb-1">Coverage evaluation failed</p>
+          <p className="font-mono text-xs break-all">{state.error}</p>
         </div>
       )}
 
       {state.coverageScore > 0 && !state.loading && (
-        <div className="mt-6">
+        <div className="mt-6 animate-fade-in">
           <p className="text-slate-600 mb-2">Coverage Score: <strong>{state.coverageScore}%</strong></p>
-          <div className="bg-slate-200 rounded-full h-4 w-full">
+          <div className="bg-slate-200 rounded-full h-4 w-full overflow-hidden">
             <div
               className="bg-indigo-600 h-4 rounded-full transition-all duration-1000 ease-out"
               style={{ width: `${state.coverageScore}%` }}

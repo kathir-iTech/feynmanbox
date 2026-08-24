@@ -1,4 +1,5 @@
 import type { Milestone } from "../types"
+import { parseGeminiJson } from "./parseGeminiJson"
 
 export interface CoverageResult {
   milestones_covered: boolean[]
@@ -26,7 +27,7 @@ export async function checkCoverage(
         {
           parts: [
             {
-              text: `Given these milestones:\n${milestonesText}\n\nAnd this student explanation:\n"${transcript}"\n\nReturn ONLY valid JSON in this format: {"milestones_covered": [true/false, true/false, true/false], "coverage_score": 0-100}. The coverage_score should be a percentage (0-100) representing how much of the milestones were substantively mentioned in the transcript. Be thorough - students may paraphrase concepts rather than use exact wording.`
+              text: `Given these milestones:\n${milestonesText}\n\nAnd this student explanation:\n"${transcript}"\n\nReturn ONLY valid JSON (no markdown, no code fences) in this format: {"milestones_covered": [true/false, true/false, true/false], "coverage_score": 0-100}. The coverage_score should be a percentage (0-100) representing how much of the milestones were substantively mentioned in the transcript. Be thorough - students may paraphrase concepts rather than use exact wording.`
             }
           ]
         }
@@ -52,12 +53,14 @@ export async function checkCoverage(
   const text = data.candidates[0].content.parts[0].text
 
   try {
-    const parsed = JSON.parse(text)
+    const parsed = parseGeminiJson<{ milestones_covered: boolean[]; coverage_score: number }>(text)
     return {
       milestones_covered: parsed.milestones_covered,
       coverage_score: parsed.coverage_score,
     }
-  } catch {
-    throw new Error("Failed to parse coverage response from Gemini")
+  } catch (parseErr) {
+    console.error("[checkCoverage] Raw Gemini response:", text)
+    console.error("[checkCoverage] Parse error:", parseErr)
+    throw new Error(`Failed to parse coverage response. Raw: ${text.substring(0, 200)}`)
   }
 }
