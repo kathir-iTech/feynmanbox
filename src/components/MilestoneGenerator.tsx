@@ -18,7 +18,7 @@ export const MilestoneGenerator: React.FC<{
     }
 
     if (!apiKey) {
-      setError("Gemini API key not configured. Check Vercel environment variables.")
+      setError("API key not configured. Set VITE_GEMINI_API_KEY in Vercel.")
       return
     }
 
@@ -33,7 +33,7 @@ export const MilestoneGenerator: React.FC<{
         setError(result.error || "Failed to generate milestones.")
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unexpected error. Please try again."
+      const message = err instanceof Error ? err.message : "Unexpected error"
       setError(message)
     } finally {
       setLoading(false)
@@ -41,45 +41,45 @@ export const MilestoneGenerator: React.FC<{
   }
 
   return (
-    <div className="p-6 bg-white rounded-lg shadow-sm mb-6 relative overflow-hidden">
+    <div className="panel p-6 relative overflow-hidden">
       {loading && (
-        <div className="absolute top-0 left-0 right-0 h-1">
-          <div className="h-full bg-indigo-500 animate-progress-bar" />
+        <div className="absolute top-0 left-0 right-0 h-0.5">
+          <div className="h-full bg-brass animate-progress-bar" />
         </div>
       )}
 
-      <h2 className="text-xl font-bold text-slate-800 mb-4">Context Anchor: Lecture Notes</h2>
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-2 h-2 bg-brass rounded-sm" />
+        <h2 className="font-serif text-xl font-semibold text-parchment">
+          Context Anchor
+        </h2>
+      </div>
+      <p className="label-tag mb-4">Lecture Notes Input</p>
 
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder="Paste your lecture notes here..."
+        placeholder="Paste lecture notes here..."
         rows={4}
-        className="w-full border border-slate-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors min-h-[150px]"
+        className="w-full bg-ink border border-ink-border rounded-panel p-3 font-mono text-sm text-parchment placeholder:text-parchment-muted/50 focus:outline-none focus:border-brass transition-colors min-h-[150px]"
       />
 
       <div className="mt-4">
         <button
           onClick={generate}
           disabled={!notes.trim() || loading || !apiKey}
-          className={`px-6 py-2 rounded-md font-medium transition-colors ${
+          className={`btn-primary w-full sm:w-auto ${
             loading || !notes.trim() || !apiKey
-              ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-              : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
+              ? "opacity-40 cursor-not-allowed"
+              : ""
           }`}
         >
-          {loading
-            ? "Generating milestones..."
-            : "Generate 3 Milestones"}
+          {loading ? "Generating..." : "Generate 3 Milestones"}
         </button>
       </div>
 
-      {loading && (
-        <p className="mt-3 text-sm text-slate-500">Calling Gemini Flash...</p>
-      )}
-
       {error && (
-        <div className="mt-4 p-3 rounded bg-red-100 text-red-800 text-sm mb-4">
+        <div className="mt-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
           {error}
         </div>
       )}

@@ -49,43 +49,30 @@ export const useMasteryLoop = (
     setState((prev) => ({ ...prev, showHint: true }))
   }
 
-  return {
-    state,
-    setState,
-    reset,
-    showHintAction,
-    onMastery,
-  }
+  return { state, setState, reset, showHintAction, onMastery }
 }
 
-function AnimatedScore({ value, label }: { value: number; label: string }) {
+function AnimatedScore({ value }: { value: number }) {
   const [displayed, setDisplayed] = useState(0)
   const frameRef = useRef<number>(0)
 
   useEffect(() => {
     const start = performance.now()
     const duration = 1000
-
     const animate = (now: number) => {
       const elapsed = now - start
       const progress = Math.min(elapsed / duration, 1)
       const eased = 1 - Math.pow(1 - progress, 3)
       setDisplayed(Math.round(eased * value))
-
       if (progress < 1) {
         frameRef.current = requestAnimationFrame(animate)
       }
     }
-
     frameRef.current = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(frameRef.current)
   }, [value])
 
-  return (
-    <p className="text-slate-600 mb-2">
-      {label}: <strong className="text-lg">{displayed}</strong>/100
-    </p>
-  )
+  return <span className="score-display">{displayed}</span>
 }
 
 export const MasteryLoop: React.FC<{
@@ -94,110 +81,108 @@ export const MasteryLoop: React.FC<{
   onMastery?: (isMastered: boolean) => void
   onReset?: () => void
 }> = ({ milestones, transcript, onMastery: _onMastery, onReset }) => {
-  const { state, reset, showHintAction } = useMasteryLoop(
-    milestones,
-    _onMastery,
-    onReset
-  )
-
+  const { state, reset, showHintAction } = useMasteryLoop(milestones, _onMastery, onReset)
   const hasScore = state.finalScore > 0
 
   let content: React.ReactNode
 
   if (state.masteryVerified) {
     content = (
-      <div className="bg-green-100 border border-green-400 rounded-xl p-6 text-center mb-6 animate-fade-in">
-        <h3 className="text-2xl font-bold text-green-800">Mastery Verified!</h3>
-        <AnimatedScore value={state.finalScore} label="Score" />
-        <p className="text-green-600">
-          Your explanation demonstrates excellent coverage and clarity!
-        </p>
-        <div className="inline-block mt-4">
-          <svg
-            className="w-12 h-12 text-green-400 animate-bounce"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-          >
-            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-          </svg>
+      <div className="animate-fade-in">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-2 h-2 bg-verified rounded-sm" />
+          <h2 className="font-serif text-xl font-semibold text-verified">
+            Mastery Verified
+          </h2>
         </div>
+        <div className="flex items-baseline gap-3 mb-3">
+          <AnimatedScore value={state.finalScore} />
+          <span className="label-tag">/100</span>
+        </div>
+        <p className="font-mono text-xs text-parchment-muted leading-relaxed">
+          Your explanation demonstrates substantive coverage and coherent
+          logical structure. The examination is complete.
+        </p>
       </div>
     )
   } else if (state.isGaming) {
     content = (
-      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded animate-shake animate-pulse-red">
-        <h4 className="font-medium text-red-700 mb-2">Gaming Detected!</h4>
-        <p className="text-red-600 mb-2">{state.reasoning}</p>
-        <p className="text-sm text-red-500">Clarity score forced to 0.</p>
-        <button
-          onClick={reset}
-          className="mt-3 text-indigo-600 hover:underline text-sm"
-        >
-          Try Again
+      <div className="p-4 rounded-panel border border-flagged/60 bg-flagged/10 animate-shake animate-pulse-red">
+        <p className="font-mono text-sm font-bold text-flagged tracking-wide">
+          [ANALYSIS FLAGGED]
+        </p>
+        <p className="font-mono text-xs text-flagged/70 mt-2">{state.reasoning}</p>
+        <button onClick={reset} className="mt-3 text-brass text-xs font-mono hover:text-brass-light transition-colors">
+          [RETRY]
         </button>
       </div>
     )
   } else if (state.showHint) {
     content = (
-      <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded animate-fade-in">
-        <h4 className="font-medium text-yellow-700 mb-2">Coaching Hint</h4>
-        <p className="text-yellow-600">{state.hint}</p>
-        <button
-          onClick={reset}
-          className="mt-3 text-indigo-600 hover:underline text-sm"
-        >
-          Try Again
+      <div className="p-4 rounded-panel border border-brass/30 bg-brass/5 animate-fade-in">
+        <p className="label-tag text-[10px] mb-2">Coaching Directive</p>
+        <p className="font-serif text-sm text-parchment leading-relaxed">{state.hint}</p>
+        <button onClick={reset} className="mt-3 text-brass text-xs font-mono hover:text-brass-light transition-colors">
+          [RETRY]
         </button>
       </div>
     )
   } else if (hasScore) {
-    const barColor = state.finalScore >= 90 ? "bg-green-500" : "bg-indigo-600"
+    const barColor = state.finalScore >= 90 ? "bg-verified" : "bg-brass"
     content = (
       <div className="animate-fade-in">
-        <AnimatedScore value={state.finalScore} label="Final Score" />
-        <div className="bg-slate-200 h-4 w-full rounded-full overflow-hidden">
+        <div className="flex items-baseline gap-3 mb-2">
+          <span className="label-tag">Final Score</span>
+          <AnimatedScore value={state.finalScore} />
+          <span className="label-tag">/100</span>
+        </div>
+        <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-1">
           <div
-            className={`${barColor} h-4 rounded-full transition-all duration-1000 ease-out`}
+            className={`${barColor} h-full transition-all duration-1000 ease-out`}
             style={{ width: `${state.finalScore}%` }}
           />
         </div>
-        <p className="text-sm text-slate-500 mt-1">
+        <p className="font-mono text-[10px] text-parchment-muted">
           Coverage {state.coverageScore}% x 0.6 + Clarity {state.clarityScore} x 0.4
         </p>
         {state.finalScore < 90 && (
-          <button
-            onClick={showHintAction}
-            className="w-full bg-indigo-600 text-white py-2 rounded-md font-medium mt-4 transition-colors hover:bg-indigo-500 active:bg-indigo-700"
-          >
-            Get Coaching Hint
+          <button onClick={showHintAction} className="btn-primary w-full mt-5">
+            Request Coaching
           </button>
         )}
       </div>
     )
   } else {
     content = (
-      <p className="text-slate-500">
-        Complete the coverage and clarity evaluations to see your mastery score.
+      <p className="font-mono text-xs text-parchment-muted">
+        Complete coverage and clarity evaluations to generate final score.
       </p>
     )
   }
 
   return (
-    <div className="p-6 bg-white rounded-lg shadow-sm mb-6 max-w-xl mx-auto">
-      <h2 className="text-xl font-bold text-slate-800 mb-4">Mastery Check</h2>
+    <div className="panel p-6">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-2 h-2 bg-brass rounded-sm" />
+        <h2 className="font-serif text-xl font-semibold text-parchment">
+          Final Assessment
+        </h2>
+      </div>
+
       {content}
+
       {transcript && (
-        <details className="mt-4">
-          <summary className="text-sm text-slate-500 cursor-pointer hover:text-slate-700">
-            View Transcript
+        <details className="mt-5">
+          <summary className="font-mono text-[10px] text-parchment-muted cursor-pointer hover:text-parchment transition-colors tracking-wider">
+            [VIEW TRANSCRIPT]
           </summary>
-          <p className="mt-2 text-sm text-slate-600 whitespace-pre-wrap">{transcript}</p>
+          <p className="mt-2 font-mono text-xs text-parchment/60 whitespace-pre-wrap leading-relaxed">
+            {transcript}
+          </p>
         </details>
       )}
-      <button
-        onClick={reset}
-        className="mt-4 w-full bg-slate-200 text-slate-700 py-2 rounded-md font-medium transition-colors hover:bg-slate-300 active:bg-slate-400"
-      >
+
+      <button onClick={reset} className="btn-ghost w-full mt-5">
         Start Over
       </button>
     </div>

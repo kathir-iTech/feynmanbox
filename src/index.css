@@ -2,16 +2,108 @@
 @tailwind components;
 @tailwind utilities;
 
-@keyframes progress-bar-slide {
+@layer base {
+  body {
+    @apply bg-ink text-parchment font-sans antialiased;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-ink-light border border-ink-border rounded-panel;
+  }
+
+  .btn-primary {
+    @apply bg-brass text-ink font-semibold rounded-panel px-6 py-2 transition-colors;
+    @apply hover:bg-brass-light active:bg-brass-dark;
+  }
+
+  .btn-ghost {
+    @apply border border-ink-border text-parchment-muted rounded-panel px-6 py-2 transition-colors;
+    @apply hover:border-brass hover:text-parchment;
+  }
+
+  .score-display {
+    @apply font-mono text-4xl font-bold text-brass tracking-tight;
+  }
+
+  .label-tag {
+    @apply font-mono text-xs uppercase tracking-widest text-parchment-muted;
+  }
+}
+
+.polygraph-grid {
+  background-image:
+    linear-gradient(rgba(42, 51, 61, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(42, 51, 61, 0.3) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.waveform-container {
+  position: relative;
+  height: 60px;
+  overflow: hidden;
+}
+
+.waveform-line {
+  fill: none;
+  stroke: #C9962C;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+@keyframes waveShift {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50px); }
+}
+
+.waveform-animate {
+  animation: waveShift 0.8s linear infinite;
+}
+
+@keyframes progress-slide {
   0% { transform: translateX(-100%); }
   50% { transform: translateX(0%); }
   100% { transform: translateX(100%); }
 }
 
 .animate-progress-bar {
-  animation: progress-bar-slide 1.5s ease-in-out infinite;
+  animation: progress-slide 1.5s ease-in-out infinite;
 }
 
-@keyframes score-count {
-  from { --num: 0; }
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+  20%, 40%, 60%, 80% { transform: translateX(4px); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-pulse-red {
+  animation: pulseRed 0.6s ease-in-out 3;
+}
+
+@keyframes pulseRed {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(196, 69, 61, 0); }
+  50% { box-shadow: 0 0 20px 4px rgba(196, 69, 61, 0.4); }
+}
+
+.animate-border-flash {
+  animation: borderFlash 0.5s ease-in-out 3;
+}
+
+@keyframes borderFlash {
+  0%, 100% { border-color: #2A333D; }
+  50% { border-color: #C4453D; }
 }

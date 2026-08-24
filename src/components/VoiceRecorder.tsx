@@ -1,5 +1,34 @@
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder"
 
+function PolygraphWaveform() {
+  return (
+    <div className="polygraph-grid rounded-panel border border-ink-border p-4 bg-ink">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-1.5 h-1.5 bg-brass rounded-full animate-pulse" />
+        <span className="label-tag text-[10px]">Signal Active</span>
+      </div>
+      <svg
+        viewBox="0 0 400 40"
+        className="w-full h-[50px]"
+        preserveAspectRatio="none"
+      >
+        <line x1="0" y1="20" x2="400" y2="20" stroke="#2A333D" strokeWidth="1" />
+        <line x1="0" y1="10" x2="400" y2="10" stroke="#2A333D" strokeWidth="0.5" strokeDasharray="4 4" />
+        <line x1="0" y1="30" x2="400" y2="30" stroke="#2A333D" strokeWidth="0.5" strokeDasharray="4 4" />
+        <path
+          className="waveform-line waveform-animate"
+          d="M 0 20 Q 12.5 10 25 20 T 50 20 T 75 20 T 100 20 T 125 20 T 150 20 T 175 20 T 200 20 T 225 20 T 250 20 T 275 20 T 300 20 T 325 20 T 350 20 T 375 20 T 400 20 T 425 20 T 450 20"
+        />
+        <path
+          className="waveform-line waveform-animate"
+          style={{ animationDelay: "0.15s", opacity: 0.5, strokeWidth: 1.5 }}
+          d="M 0 20 Q 12.5 14 25 20 T 50 20 T 75 20 T 100 20 T 125 20 T 150 20 T 175 20 T 200 20 T 225 20 T 250 20 T 275 20 T 300 20 T 325 20 T 350 20 T 375 20 T 400 20 T 425 20 T 450 20"
+        />
+      </svg>
+    </div>
+  )
+}
+
 export const VoiceRecorder: React.FC<{
   onTranscriptReady: (transcript: string) => void
 }> = ({ onTranscriptReady }) => {
@@ -12,57 +41,56 @@ export const VoiceRecorder: React.FC<{
   } = useVoiceRecorder()
 
   return (
-    <div className="p-6 bg-white rounded-lg shadow-sm mb-6 max-w-xl mx-auto">
+    <div className="panel p-6">
       {!isSupported && (
-        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded mb-4">
-          <p className="font-medium">Web Speech API not supported</p>
-          <p className="text-sm">This feature requires Chrome or Edge browser.</p>
+        <div className="p-4 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
+          [SYSTEM] Web Speech API unavailable. Use Chrome or Edge.
         </div>
       )}
 
       {isSupported && !state.isRecording && state.finalTranscript.length === 0 && (
-        <div className="mb-4">
-          <h3 className="text-semibold text-slate-800 mb-3">Voice Explanation</h3>
-          <p className="text-slate-500 mb-4">
-            Explain your understanding of the milestones out loud. The app will transcribe your
-            explanation and evaluate your coverage and clarity.
+        <div>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-2 h-2 bg-brass rounded-sm" />
+            <h2 className="font-serif text-xl font-semibold text-parchment">
+              Voice Testimony
+            </h2>
+          </div>
+          <p className="label-tag mb-3">Microphone Input</p>
+          <p className="text-parchment-muted text-sm mb-5 leading-relaxed">
+            Explain your understanding of the milestones aloud. The system will
+            transcribe and analyze your explanation for coverage and coherence.
           </p>
 
-          <button
-            onClick={startRecording}
-            className="w-full bg-indigo-600 text-white py-3 rounded-md font-medium transition-colors hover:bg-indigo-500 active:bg-indigo-700"
-          >
-            Start Recording
+          <button onClick={startRecording} className="btn-primary w-full">
+            Begin Recording
           </button>
         </div>
       )}
 
       {state.isRecording && (
-        <div className="mb-4">
-          <h3 className="text-semibold text-slate-800 mb-3">Listening...</h3>
-
-          <div className="flex items-center justify-center gap-1 h-12 mb-4">
-            {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-              <div
-                key={i}
-                className="w-1 bg-indigo-500 rounded-full animate-wave"
-                style={{
-                  animationDelay: `${i * 0.1}s`,
-                  height: "4px",
-                }}
-              />
-            ))}
+        <div>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-2 h-2 bg-flagged rounded-full animate-pulse" />
+            <h2 className="font-serif text-xl font-semibold text-parchment">
+              Recording
+            </h2>
           </div>
+          <p className="label-tag mb-4">Live Signal</p>
+
+          <PolygraphWaveform />
 
           {state.interimTranscript && (
-            <div className="bg-slate-50 rounded p-3 max-h-[80px] overflow-y-auto mb-3">
-              <p className="text-sm text-slate-500 italic">{state.interimTranscript}</p>
+            <div className="mt-4 p-3 rounded-panel bg-ink border border-ink-border">
+              <p className="font-mono text-xs text-parchment-muted italic">
+                {state.interimTranscript}
+              </p>
             </div>
           )}
 
           <button
             onClick={stopRecording}
-            className="w-full bg-red-500 text-white py-3 rounded-md font-medium transition-colors hover:bg-red-600 active:bg-red-700"
+            className="mt-4 w-full bg-flagged/20 border border-flagged/40 text-flagged rounded-panel px-6 py-2 font-semibold transition-colors hover:bg-flagged/30"
           >
             Stop Recording
           </button>
@@ -71,22 +99,26 @@ export const VoiceRecorder: React.FC<{
 
       {!state.isRecording && state.finalTranscript.length > 0 && (
         <div>
-          <h3 className="text-semibold text-slate-800 mb-3">Transcript</h3>
-          <div className="w-full border border-slate-200 rounded-lg p-3 bg-slate-50 min-h-[80px] max-h-[200px] overflow-y-auto text-sm text-slate-700 mb-3">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-2 h-2 bg-verified rounded-sm" />
+            <h2 className="font-serif text-xl font-semibold text-parchment">
+              Transcript Captured
+            </h2>
+          </div>
+          <p className="label-tag mb-3">Recorded Testimony</p>
+
+          <div className="w-full rounded-panel bg-ink border border-ink-border p-4 font-mono text-sm text-parchment/80 min-h-[80px] max-h-[200px] overflow-y-auto leading-relaxed">
             {state.finalTranscript}
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex gap-3 mt-4">
             <button
               onClick={() => onTranscriptReady(state.finalTranscript)}
-              className="flex-1 bg-indigo-600 text-white py-2 rounded-md font-medium transition-colors hover:bg-indigo-500 active:bg-indigo-700"
+              className="btn-primary flex-1"
             >
-              Use This Transcript
+              Submit Testimony
             </button>
-            <button
-              onClick={resetTranscript}
-              className="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
-            >
+            <button onClick={resetTranscript} className="btn-ghost">
               Re-record
             </button>
           </div>

@@ -1,5 +1,3 @@
-"use client"
-
 import { useState } from "react"
 import type { Milestone } from "../types"
 
@@ -10,7 +8,6 @@ export const ExportFeature: React.FC<{
 }> = ({ milestones, transcript, onReset }) => {
   const [downloading, setDownloading] = useState(false)
 
-  // Compute export data directly - no setState in effect needed
   const exportData: Record<string, string> = {}
   milestones.forEach((milestone, index) => {
     exportData[milestone.text] =
@@ -38,27 +35,31 @@ export const ExportFeature: React.FC<{
   }
 
   return (
-    <div className="p-6 bg-white rounded-lg shadow-sm mb-6 max-w-xl mx-auto">
-      <h3 className="text-xl font-bold text-slate-800 mb-4">Download Study Cards</h3>
-      <p className="text-slate-600 mb-4">
-        Export your milestones and explanations as a JSON file for spaced-repetition
-        study. Front: milestone question, Back: your explanation.
+    <div className="panel p-6">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-2 h-2 bg-verified rounded-sm" />
+        <h2 className="font-serif text-xl font-semibold text-parchment">
+          Export Case File
+        </h2>
+      </div>
+      <p className="label-tag mb-4">Study Card Generation</p>
+
+      <p className="font-mono text-xs text-parchment-muted mb-5 leading-relaxed">
+        Download your milestones and explanations as a JSON file for
+        spaced-repetition study. Front: milestone question. Back: your explanation.
       </p>
 
       <button
         onClick={handleDownload}
         disabled={Object.keys(exportData).length === 0 || downloading}
-        className={`w-full bg-indigo-600 text-white py-3 rounded-md font-medium transition-colors hover:bg-indigo-500 active:bg-indigo-700 mt-4 ${
+        className={`btn-primary w-full ${
           downloading ? "opacity-50 cursor-not-allowed" : ""
         }`}
       >
-        {downloading ? "Downloading..." : "Download Study Cards"}
+        {downloading ? "Generating..." : "Download Study Cards"}
       </button>
 
-      <button
-        onClick={onReset}
-        className="w-full bg-slate-200 text-slate-700 py-3 rounded-md font-medium transition-colors hover:bg-slate-300 active:bg-slate-400 mt-3"
-      >
+      <button onClick={onReset} className="btn-ghost w-full mt-3">
         Start Over
       </button>
     </div>

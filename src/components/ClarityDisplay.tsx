@@ -9,23 +9,20 @@ function AnimatedScore({ value }: { value: number }) {
   useEffect(() => {
     const start = performance.now()
     const duration = 1000
-
     const animate = (now: number) => {
       const elapsed = now - start
       const progress = Math.min(elapsed / duration, 1)
       const eased = 1 - Math.pow(1 - progress, 3)
       setDisplayed(Math.round(eased * value))
-
       if (progress < 1) {
         frameRef.current = requestAnimationFrame(animate)
       }
     }
-
     frameRef.current = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(frameRef.current)
   }, [value])
 
-  return <strong className="text-lg">{displayed}</strong>
+  return <span className="score-display">{displayed}</span>
 }
 
 export const ClarityDisplay: React.FC<{
@@ -53,23 +50,12 @@ export const ClarityDisplay: React.FC<{
     if (inFlightRef.current) return
 
     if (!transcript.trim()) {
-      setState({
-        clarityScore: 0,
-        isGaming: false,
-        reasoning: "No transcript to evaluate",
-        loading: false,
-        error: null,
-      })
+      setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: "[ERROR] No transcript" })
       return
     }
 
     if (!apiKey) {
-      setState((prev) => ({
-        ...prev,
-        reasoning: "",
-        error: "Gemini API key not configured. Add VITE_GEMINI_API_KEY in Vercel dashboard.",
-        loading: false,
-      }))
+      setState((prev) => ({ ...prev, error: "[ERROR] API key not configured", loading: false }))
       return
     }
 
@@ -86,94 +72,92 @@ export const ClarityDisplay: React.FC<{
         loading: false,
         error: null,
       })
-
       if (result.is_gaming_attempt && onNext) {
         onNext()
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unexpected error"
-      setState({
-        clarityScore: 0,
-        isGaming: false,
-        reasoning: "",
-        loading: false,
-        error: message,
-      })
+      setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: message })
     } finally {
       inFlightRef.current = false
     }
   }
 
+  const isFlagged = state.isGaming && !state.loading
+
   return (
-    <div className={`p-6 bg-white rounded-lg shadow-sm mb-6 max-w-xl mx-auto relative overflow-hidden ${
-      state.isGaming ? "animate-shake animate-pulse-red" : ""
+    <div className={`panel p-6 relative overflow-hidden ${
+      isFlagged ? "animate-shake animate-pulse-red border-flagged/60" : ""
     }`}>
       {state.loading && (
-        <div className="absolute top-0 left-0 right-0 h-1">
-          <div className="h-full bg-indigo-500 animate-progress-bar" />
+        <div className="absolute top-0 left-0 right-0 h-0.5">
+          <div className="h-full bg-brass animate-progress-bar" />
         </div>
       )}
 
-      <h2 className="text-xl font-bold text-slate-800 mb-4">Clarity Analysis</h2>
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-2 h-2 bg-brass rounded-sm" />
+        <h2 className="font-serif text-xl font-semibold text-parchment">
+          Clarity Analysis
+        </h2>
+      </div>
+      <p className="label-tag mb-5">Coherence Diagnostic</p>
 
       <button
         onClick={evaluate}
         disabled={state.loading || !transcript.trim() || !apiKey}
-        className={`px-6 py-2 rounded-md font-medium transition-colors ${
+        className={`btn-primary w-full ${
           state.loading || !transcript.trim() || !apiKey
-            ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-            : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
+            ? "opacity-40 cursor-not-allowed"
+            : ""
         }`}
       >
-        {state.loading ? (
-          <span className="flex items-center gap-2">
-            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            Evaluating...
-          </span>
-        ) : "Rate Clarity"}
+        {state.loading ? "Analyzing..." : "Rate Clarity"}
       </button>
 
       {state.error && !state.loading && (
-        <div className="mt-4 p-4 rounded-lg border-2 border-red-300 bg-red-50 text-red-800 text-sm">
-          <p className="font-bold mb-1">Clarity evaluation failed</p>
-          <p className="font-mono text-xs break-all">{state.error}</p>
+        <div className="mt-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 font-mono text-xs text-flagged">
+          {state.error}
         </div>
       )}
 
-      {state.isGaming && !state.loading && (
-        <div className="mt-6 bg-red-50 border-l-4 border-red-500 p-4 rounded animate-fade-in">
-          <h3 className="text-red-700 font-medium mb-2">Gaming Detected!</h3>
-          <p className="text-red-600 mb-3">{state.reasoning}</p>
-          <p className="text-sm text-red-500">Clarity score forced to 0.</p>
+      {isFlagged && (
+        <div className="mt-6 p-4 rounded-panel border border-flagged/60 bg-flagged/10 animate-fade-in">
+          <p className="font-mono text-sm font-bold text-flagged tracking-wide">
+            [ANALYSIS FLAGGED: INCOHERENT PATTERN DETECTED]
+          </p>
+          <p className="font-mono text-xs text-flagged/70 mt-2">{state.reasoning}</p>
+          <p className="font-mono text-[10px] text-parchment-muted mt-3">
+            Clarity score overridden to 0. The system detected keyword-listing
+            without logical sentence structure.
+          </p>
         </div>
       )}
 
       {state.clarityScore > 0 && !state.isGaming && !state.loading && (
         <div className="mt-6 animate-fade-in">
-          <p className="text-slate-600 mb-2">
-            Clarity Score: <AnimatedScore value={state.clarityScore} />/100
-          </p>
-          <div className="bg-slate-200 rounded-full h-4 w-full overflow-hidden">
+          <div className="flex items-baseline gap-3 mb-2">
+            <span className="label-tag">Clarity</span>
+            <AnimatedScore value={state.clarityScore} />
+            <span className="label-tag">/100</span>
+          </div>
+          <div className="h-1 bg-ink-border rounded-sm overflow-hidden">
             <div
-              className="bg-green-500 h-4 rounded-full transition-all duration-1000 ease-out"
+              className="h-full bg-brass transition-all duration-1000 ease-out"
               style={{ width: `${state.clarityScore}%` }}
             />
           </div>
           {state.reasoning && (
-            <p className="mt-3 text-sm text-slate-500">{state.reasoning}</p>
+            <p className="mt-3 font-mono text-xs text-parchment-muted">
+              {state.reasoning}
+            </p>
           )}
         </div>
       )}
 
       {(state.clarityScore > 0 || state.isGaming) && !state.loading && (
-        <button
-          onClick={onNext}
-          className="mt-4 w-full px-6 py-2 rounded-md font-medium transition-colors bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
-        >
-          Continue
+        <button onClick={onNext} className="btn-primary w-full mt-6">
+          Proceed
         </button>
       )}
     </div>

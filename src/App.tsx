@@ -30,51 +30,57 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100">
-      <div className="max-w-4xl mx-auto p-6">
-        <h1 className="text-2xl font-bold text-slate-800 mb-6 text-center">
-          FeynmanBox
-        </h1>
+    <div className="min-h-screen bg-ink">
+      <div className="max-w-3xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
+        <header className="mb-10 text-center">
+          <h1 className="font-serif text-4xl sm:text-5xl font-bold text-parchment tracking-tight">
+            FeynmanBox
+          </h1>
+          <div className="mt-3 mx-auto w-16 h-0.5 bg-brass" />
+          <p className="mt-3 label-tag">Oral Examination System</p>
+        </header>
 
-        {milestones.length === 0 && (
-          <MilestoneGenerator onMilestonesGenerated={setMilestones} />
-        )}
+        <main className="space-y-6">
+          {milestones.length === 0 && (
+            <MilestoneGenerator onMilestonesGenerated={setMilestones} />
+          )}
 
-        {milestones.length > 0 && !transcript && (
-          <VoiceRecorder onTranscriptReady={setTranscript} />
-        )}
+          {milestones.length > 0 && !transcript && (
+            <VoiceRecorder onTranscriptReady={setTranscript} />
+          )}
 
-        {milestones.length > 0 && transcript && !showClarity && (
-          <CoverageDisplay
-            milestones={milestones}
-            transcript={transcript}
-            onEvaluated={handleCoverageComplete}
-          />
-        )}
+          {milestones.length > 0 && transcript && !showClarity && (
+            <CoverageDisplay
+              milestones={milestones}
+              transcript={transcript}
+              onEvaluated={handleCoverageComplete}
+            />
+          )}
 
-        {showClarity && milestones.length > 0 && transcript && (
-          <ClarityDisplay
-            transcript={transcript}
-            onNext={() => setShowClarity(false)}
-          />
-        )}
+          {showClarity && milestones.length > 0 && transcript && (
+            <ClarityDisplay
+              transcript={transcript}
+              onNext={() => setShowClarity(false)}
+            />
+          )}
 
-        {milestones.length > 0 && transcript && (
-          <MasteryLoop
-            milestones={milestones}
-            transcript={transcript}
-            onMastery={handleMastery}
-            onReset={handleReset}
-          />
-        )}
+          {milestones.length > 0 && transcript && (
+            <MasteryLoop
+              milestones={milestones}
+              transcript={transcript}
+              onMastery={handleMastery}
+              onReset={handleReset}
+            />
+          )}
 
-        {isMastered && milestones.length > 0 && (
-          <ExportFeature
-            milestones={milestones}
-            transcript={transcript}
-            onReset={handleReset}
-          />
-        )}
+          {isMastered && milestones.length > 0 && (
+            <ExportFeature
+              milestones={milestones}
+              transcript={transcript}
+              onReset={handleReset}
+            />
+          )}
+        </main>
       </div>
     </div>
   )

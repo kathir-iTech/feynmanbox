@@ -12,60 +12,41 @@ export const CoverageDisplay: React.FC<{
     coverageScore: number
     loading: boolean
     error: string | null
-    rawResponse: string | null
   }>({
     covered: milestones.map(() => false),
     coverageScore: 0,
     loading: false,
     error: null,
-    rawResponse: null,
   })
 
   const inFlightRef = useRef(false)
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
   const evaluate = async () => {
-    if (inFlightRef.current) {
-      console.log("[CoverageDisplay] Ignoring click — request already in flight")
-      return
-    }
-
-    console.log("[CoverageDisplay] evaluate clicked", {
-      hasTranscript: !!transcript.trim(),
-      hasApiKey: !!apiKey,
-      transcriptLength: transcript.length,
-    })
+    if (inFlightRef.current) return
 
     if (!transcript.trim()) {
-      setState((prev) => ({ ...prev, error: "No transcript to evaluate" }))
+      setState((prev) => ({ ...prev, error: "[ERROR] No transcript provided" }))
       return
     }
 
     if (!apiKey) {
-      setState((prev) => ({
-        ...prev,
-        error: "Gemini API key not configured. Add VITE_GEMINI_API_KEY in Vercel dashboard settings.",
-        rawResponse: null,
-      }))
+      setState((prev) => ({ ...prev, error: "[ERROR] API key not configured" }))
       return
     }
 
     inFlightRef.current = true
-    setState((prev) => ({ ...prev, loading: true, error: null, rawResponse: null }))
+    setState((prev) => ({ ...prev, loading: true, error: null }))
 
     try {
-      console.log("[CoverageDisplay] calling checkCoverage...")
       const result = await checkCoverage(milestones, transcript, apiKey)
-      console.log("[CoverageDisplay] SUCCESS — result:", result)
       setState({
         covered: result.milestones_covered,
         coverageScore: result.coverage_score,
         loading: false,
         error: null,
-        rawResponse: null,
       })
     } catch (err: unknown) {
-      console.error("[CoverageDisplay] FAILED:", err)
       const message = err instanceof Error ? err.message : "Unexpected error"
       setState((prev) => ({
         ...prev,
@@ -73,7 +54,6 @@ export const CoverageDisplay: React.FC<{
         coverageScore: 0,
         loading: false,
         error: message,
-        rawResponse: null,
       }))
     } finally {
       inFlightRef.current = false
@@ -81,18 +61,26 @@ export const CoverageDisplay: React.FC<{
   }
 
   return (
-    <div className="p-6 bg-white rounded-lg shadow-sm mb-6 max-w-xl mx-auto relative overflow-hidden">
+    <div className={`panel p-6 relative overflow-hidden ${
+      state.error && !state.loading ? "border-flagged/40" : ""
+    }`}>
       {state.loading && (
-        <div className="absolute top-0 left-0 right-0 h-1">
-          <div className="h-full bg-indigo-500 animate-progress-bar" />
+        <div className="absolute top-0 left-0 right-0 h-0.5">
+          <div className="h-full bg-brass animate-progress-bar" />
         </div>
       )}
 
-      <h2 className="text-xl font-bold text-slate-800 mb-4">Coverage Analysis</h2>
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-2 h-2 bg-brass rounded-sm" />
+        <h2 className="font-serif text-xl font-semibold text-parchment">
+          Coverage Analysis
+        </h2>
+      </div>
+      <p className="label-tag mb-5">Milestone Verification</p>
 
-      <div className="mb-4">
-        <p className="text-sm text-slate-500 mb-2">Your transcript ({transcript.length} chars):</p>
-        <div className="w-full border border-slate-200 rounded-lg p-3 bg-slate-50 min-h-[80px] max-h-[150px] overflow-y-auto text-sm text-slate-700">
+      <div className="mb-5">
+        <p className="label-tag text-[10px] mb-2">Input Transcript</p>
+        <div className="w-full rounded-panel bg-ink border border-ink-border p-3 font-mono text-xs text-parchment/60 min-h-[60px] max-h-[120px] overflow-y-auto">
           {transcript || "(empty)"}
         </div>
       </div>
@@ -100,76 +88,81 @@ export const CoverageDisplay: React.FC<{
       <button
         onClick={evaluate}
         disabled={state.loading || !transcript.trim() || !apiKey}
-        className={`px-6 py-2 rounded-md font-medium transition-colors ${
+        className={`btn-primary w-full ${
           state.loading || !transcript.trim() || !apiKey
-            ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-            : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
+            ? "opacity-40 cursor-not-allowed"
+            : ""
         }`}
       >
-        {state.loading ? (
-          <span className="flex items-center gap-2">
-            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            Evaluating...
-          </span>
-        ) : !apiKey ? "API Key Not Configured" : "Evaluate Coverage"}
+        {state.loading ? "Analyzing..." : "Evaluate Coverage"}
       </button>
 
-      {!apiKey && (
-        <p className="mt-2 text-sm text-amber-600">
-          Add <code className="bg-amber-50 px-1 rounded">VITE_GEMINI_API_KEY</code> in Vercel dashboard Settings → Environment Variables, then redeploy.
-        </p>
-      )}
-
       {state.error && !state.loading && (
-        <div className="mt-4 p-4 rounded-lg border-2 border-red-300 bg-red-50 text-red-800 text-sm">
-          <p className="font-bold mb-1">Coverage evaluation failed</p>
-          <p className="font-mono text-xs break-all">{state.error}</p>
+        <div className="mt-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 font-mono text-xs text-flagged">
+          {state.error}
         </div>
       )}
 
       {state.coverageScore > 0 && !state.loading && (
         <div className="mt-6 animate-fade-in">
-          <p className="text-slate-600 mb-2">Coverage Score: <strong>{state.coverageScore}%</strong></p>
-          <div className="bg-slate-200 rounded-full h-4 w-full overflow-hidden">
+          <div className="flex items-baseline gap-3 mb-2">
+            <span className="label-tag">Coverage</span>
+            <span className="score-display text-3xl">{state.coverageScore}%</span>
+          </div>
+          <div className="h-1 bg-ink-border rounded-sm overflow-hidden">
             <div
-              className="bg-indigo-600 h-4 rounded-full transition-all duration-1000 ease-out"
+              className="h-full bg-brass transition-all duration-1000 ease-out"
               style={{ width: `${state.coverageScore}%` }}
             />
           </div>
 
-          <div className="mt-4">
-            <h3 className="font-medium text-slate-700 mb-3">Milestone Coverage</h3>
+          <div className="mt-6">
+            <p className="label-tag text-[10px] mb-3">Case File</p>
             <div className="space-y-2">
-              {milestones.map((milestone, index) => (
-                <div
-                  key={milestone.id}
-                  className={`flex items-center gap-3 p-2 rounded transition-all duration-500 ${
-                    state.covered[index] ? "bg-green-50" : "bg-red-50"
-                  }`}
-                  style={{ transitionDelay: `${index * 300}ms` }}
-                >
-                  <span className={`text-sm font-bold transition-colors duration-500 ${
-                    state.covered[index] ? "text-green-600" : "text-red-500"
-                  }`}>
-                    {state.covered[index] ? "\u2713" : "\u2717"}
-                  </span>
-                  <span className="text-sm text-slate-700">{milestone.text}</span>
-                </div>
-              ))}
+              {milestones.map((milestone, index) => {
+                const verified = state.covered[index]
+                return (
+                  <div
+                    key={milestone.id}
+                    className={`flex items-start gap-3 p-3 rounded-panel border transition-all duration-500 ${
+                      verified
+                        ? "border-verified/30 bg-verified/5"
+                        : "border-ink-border bg-ink"
+                    }`}
+                    style={{ transitionDelay: `${index * 300}ms` }}
+                  >
+                    <div className={`mt-0.5 w-4 h-4 rounded-sm border-2 flex items-center justify-center flex-shrink-0 transition-all duration-500 ${
+                      verified
+                        ? "bg-brass border-brass"
+                        : "border-parchment-muted/30"
+                    }`}>
+                      {verified && (
+                        <svg className="w-2.5 h-2.5 text-ink" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M2 6l3 3 5-5" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-serif text-sm text-parchment leading-snug">
+                        {milestone.text}
+                      </p>
+                    </div>
+                    {verified && (
+                      <span className="font-mono text-[10px] text-verified tracking-wider flex-shrink-0 mt-0.5">
+                        [VERIFIED]
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
       )}
 
       {state.coverageScore > 0 && !state.loading && (
-        <button
-          onClick={onEvaluated}
-          className="mt-4 w-full px-6 py-2 rounded-md font-medium transition-colors bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
-        >
-          Continue to Clarity Check
+        <button onClick={onEvaluated} className="btn-primary w-full mt-6">
+          Proceed to Clarity Check
         </button>
       )}
     </div>
