@@ -33,3 +33,9 @@ export interface EvaluationResult {
   masteryVerified: boolean
   hint: string | null
 }
+
+export interface ClarityResult {
+  clarity_score: number
+  is_gaming_attempt: boolean
+  reasoning: string
+}

@@ -7,7 +7,7 @@ import type { ClarityResult } from "../types"
 export const ClarityDisplay: React.FC<{
   transcript: string
   onNext?: () => void
-}> = ({ transcript, _coverageScore, onNext }) => {
+}> = ({ transcript, onNext }) => {
   const [state, setState] = useState<{
     clarityScore: number
     isGaming: boolean

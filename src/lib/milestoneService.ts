@@ -47,13 +47,15 @@ export async function generateMilestones(notes: string, apiKey: string): Promise
         text: m,
         covered: false
       })),
-      error: null
+      error: null,
+      loading: false
     }
   } catch {
     return {
       success: false,
       milestones: [],
-      error: "Failed to parse Gemini response. Please try again."
+      error: "Failed to parse Gemini response. Please try again.",
+      loading: false
     }
   }
 }

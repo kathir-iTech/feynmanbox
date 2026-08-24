@@ -14,27 +14,17 @@ export const useVoiceRecorder = () => {
     interimTranscript: "",
     isRecording: false,
   })
-  const recognitionRef = useRef<window.SpeechRecognition | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null)
   const [isSupported, setIsSupported] = useState<boolean | null>(null)
 
   useEffect(() => {
-    const checkSupport = () => {
-      const SpeechRecognition =
-        window.SpeechRecognition || (window as any).webkitSpeechRecognition
-
-      if (SpeechRecognition) {
-        setIsSupported(true)
-      } else {
-        setIsSupported(false)
-      }
-    }
-
-    checkSupport()
-
-    const SpeechRecognition =
-      window.SpeechRecognition || (window as any).webkitSpeechRecognition
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechRecognition: any =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
 
     if (SpeechRecognition) {
+      setIsSupported(true)
       const recognition = new SpeechRecognition()
       recognition.continuous = false
       recognition.interimResults = false
@@ -45,8 +35,8 @@ export const useVoiceRecorder = () => {
       }
 
       recognition.onresult = (event: any) => {
-        const final = []
-        const interim = []
+        const final: string[] = []
+        const interim: string[] = []
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript
@@ -60,12 +50,12 @@ export const useVoiceRecorder = () => {
 
         setState((prev) => ({
           ...prev,
-          finalTranscript: final.join(" "),
+          finalTranscript: prev.finalTranscript + (prev.finalTranscript ? " " : "") + final.join(" "),
           interimTranscript: interim.join(" "),
         }))
       }
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: { error: string }) => {
         setState((prev) => ({ ...prev, isRecording: false }))
         if (event.error !== "abort") {
           // handled gracefully
@@ -82,6 +72,8 @@ export const useVoiceRecorder = () => {
         recognition.stop()
         recognitionRef.current = null
       }
+    } else {
+      setIsSupported(false)
     }
   }, [])
 

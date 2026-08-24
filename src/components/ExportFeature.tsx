@@ -6,8 +6,8 @@ import type { Milestone } from "../types"
 export const ExportFeature: React.FC<{
   milestones: Milestone[]
   transcript: string
-  _onReset: () => void
-}> = ({ milestones, transcript, _onReset }) => {
+  onReset: () => void
+}> = ({ milestones, transcript, onReset }) => {
   const [downloading, setDownloading] = useState(false)
 
   // Compute export data directly - no setState in effect needed
@@ -53,6 +53,13 @@ export const ExportFeature: React.FC<{
         }`}
       >
         {downloading ? "Downloading..." : "Download Study Cards"}
+      </button>
+
+      <button
+        onClick={onReset}
+        className="w-full bg-slate-200 text-slate-700 py-3 rounded-md font-medium transition-colors hover:bg-slate-300 active:bg-slate-400 mt-3"
+      >
+        Start Over
       </button>
     </div>
   )

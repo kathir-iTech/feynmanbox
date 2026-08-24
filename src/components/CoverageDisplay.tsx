@@ -2,7 +2,7 @@
 
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { checkCoverage } from "../lib/coverageService"
 import type { Milestone, CoverageState } from "../types"
 
@@ -73,11 +73,18 @@ export const useCoverageEvaluator = (milestones: Milestone[], apiKey: string) =>
 
 /* eslint-enable react/only-export-components */
 
-export const CoverageDisplay: React.FC = () => {
-  const { state, evaluate } = useCoverageEvaluator(
-    [],
-    import.meta.env.VITE_GEMINI_API_KEY
-  )
+export const CoverageDisplay: React.FC<{
+  milestones: Milestone[]
+  onEvaluated: () => void
+}> = ({ milestones, onEvaluated }) => {
+  const { state, evaluate } = useCoverageEvaluator(milestones, import.meta.env.VITE_GEMINI_API_KEY || "")
+
+  // Initialize evaluation when transcript changes
+  useEffect(() => {
+    if (state.coverageScore > 0) {
+      evaluate("placeholder transcript")
+    }
+  }, [state.coverageScore])
 
   return (
     <div className="p-6 bg-white rounded-lg shadow-sm mb-6 max-w-xl mx-auto">
@@ -129,6 +136,16 @@ export const CoverageDisplay: React.FC = () => {
           </div>
         </div>
       )}
+
+      <button
+        onClick={onEvaluated}
+        disabled={state.loading}
+        className={`px-6 py-2 rounded-md font-medium transition-colors ${
+          state.loading ? "bg-slate-200 text-slate-500 cursor-not-allowed" : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
+        }`}
+      >
+        Evaluate
+      </button>
     </div>
   )
 }
