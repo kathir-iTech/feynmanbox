@@ -22,20 +22,24 @@ export const CoverageDisplay: React.FC<{
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
   const evaluate = async () => {
+    console.log("[CoverageDisplay] evaluate clicked", { hasTranscript: !!transcript.trim(), hasApiKey: !!apiKey })
+
     if (!transcript.trim()) {
       setState((prev) => ({ ...prev, error: "No transcript to evaluate" }))
       return
     }
 
     if (!apiKey) {
-      setState((prev) => ({ ...prev, error: "Gemini API key not configured" }))
+      setState((prev) => ({ ...prev, error: "Gemini API key not configured. Add VITE_GEMINI_API_KEY in Vercel dashboard." }))
       return
     }
 
     setState((prev) => ({ ...prev, loading: true, error: null }))
 
     try {
+      console.log("[CoverageDisplay] calling checkCoverage...")
       const result = await checkCoverage(milestones, transcript, apiKey)
+      console.log("[CoverageDisplay] result:", result)
       setState({
         covered: result.milestones_covered,
         coverageScore: result.coverage_score,
@@ -43,6 +47,7 @@ export const CoverageDisplay: React.FC<{
         error: null,
       })
     } catch (err: unknown) {
+      console.error("[CoverageDisplay] error:", err)
       const message = err instanceof Error ? err.message : "Unexpected error"
       setState((prev) => ({
         ...prev,
@@ -55,7 +60,13 @@ export const CoverageDisplay: React.FC<{
   }
 
   return (
-    <div className="p-6 bg-white rounded-lg shadow-sm mb-6 max-w-xl mx-auto">
+    <div className="p-6 bg-white rounded-lg shadow-sm mb-6 max-w-xl mx-auto relative overflow-hidden">
+      {state.loading && (
+        <div className="absolute top-0 left-0 right-0 h-1">
+          <div className="h-full bg-indigo-500 animate-progress-bar" />
+        </div>
+      )}
+
       <h2 className="text-xl font-bold text-slate-800 mb-4">Coverage Analysis</h2>
 
       <div className="mb-4">
@@ -74,10 +85,16 @@ export const CoverageDisplay: React.FC<{
             : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
         }`}
       >
-        {state.loading ? "Evaluating..." : "Evaluate Coverage"}
+        {state.loading ? (
+          <span className="flex items-center gap-2">
+            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Evaluating...
+          </span>
+        ) : "Evaluate Coverage"}
       </button>
-
-      {state.loading && <p className="mt-3 text-sm text-slate-500">Checking milestone coverage...</p>}
 
       {state.error && !state.loading && (
         <div className="mt-4 p-3 rounded bg-red-100 text-red-800 text-sm mb-4">
@@ -90,7 +107,7 @@ export const CoverageDisplay: React.FC<{
           <p className="text-slate-600 mb-2">Coverage Score: <strong>{state.coverageScore}%</strong></p>
           <div className="bg-slate-200 rounded-full h-4 w-full">
             <div
-              className="bg-indigo-600 h-4 rounded-full transition-colors"
+              className="bg-indigo-600 h-4 rounded-full transition-all duration-1000 ease-out"
               style={{ width: `${state.coverageScore}%` }}
             />
           </div>
@@ -101,11 +118,14 @@ export const CoverageDisplay: React.FC<{
               {milestones.map((milestone, index) => (
                 <div
                   key={milestone.id}
-                  className={`flex items-center gap-3 p-2 rounded ${
+                  className={`flex items-center gap-3 p-2 rounded transition-all duration-500 ${
                     state.covered[index] ? "bg-green-50" : "bg-red-50"
                   }`}
+                  style={{ transitionDelay: `${index * 300}ms` }}
                 >
-                  <span className={`text-sm ${state.covered[index] ? "text-green-600" : "text-red-500"}`}>
+                  <span className={`text-sm font-bold transition-colors duration-500 ${
+                    state.covered[index] ? "text-green-600" : "text-red-500"
+                  }`}>
                     {state.covered[index] ? "\u2713" : "\u2717"}
                   </span>
                   <span className="text-sm text-slate-700">{milestone.text}</span>

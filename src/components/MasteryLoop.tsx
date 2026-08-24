@@ -1,6 +1,4 @@
-"use client"
-
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import type { Milestone } from "../types"
 
 export interface MasteryState {
@@ -32,10 +30,6 @@ export const useMasteryLoop = (
     reasoning: "",
   })
 
-  const calculateFinalScore = (coverage: number, clarity: number): number => {
-    return Math.round(coverage * 0.6 + clarity * 0.4)
-  }
-
   const reset = () => {
     setState({
       finalScore: 0,
@@ -58,11 +52,40 @@ export const useMasteryLoop = (
   return {
     state,
     setState,
-    calculateFinalScore,
     reset,
     showHintAction,
     onMastery,
   }
+}
+
+function AnimatedScore({ value, label }: { value: number; label: string }) {
+  const [displayed, setDisplayed] = useState(0)
+  const frameRef = useRef<number>(0)
+
+  useEffect(() => {
+    const start = performance.now()
+    const duration = 1000
+
+    const animate = (now: number) => {
+      const elapsed = now - start
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplayed(Math.round(eased * value))
+
+      if (progress < 1) {
+        frameRef.current = requestAnimationFrame(animate)
+      }
+    }
+
+    frameRef.current = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(frameRef.current)
+  }, [value])
+
+  return (
+    <p className="text-slate-600 mb-2">
+      {label}: <strong className="text-lg">{displayed}</strong>/100
+    </p>
+  )
 }
 
 export const MasteryLoop: React.FC<{
@@ -70,10 +93,10 @@ export const MasteryLoop: React.FC<{
   transcript: string
   onMastery?: (isMastered: boolean) => void
   onReset?: () => void
-}> = ({ milestones, transcript, onMastery, onReset }) => {
+}> = ({ milestones, transcript, onMastery: _onMastery, onReset }) => {
   const { state, reset, showHintAction } = useMasteryLoop(
     milestones,
-    onMastery,
+    _onMastery,
     onReset
   )
 
@@ -83,11 +106,9 @@ export const MasteryLoop: React.FC<{
 
   if (state.masteryVerified) {
     content = (
-      <div className="bg-green-100 border border-green-400 rounded-xl p-6 text-center mb-6">
+      <div className="bg-green-100 border border-green-400 rounded-xl p-6 text-center mb-6 animate-fade-in">
         <h3 className="text-2xl font-bold text-green-800">Mastery Verified!</h3>
-        <p className="text-green-600 mb-2">
-          Score: <strong>{state.finalScore}</strong>/100
-        </p>
+        <AnimatedScore value={state.finalScore} label="Score" />
         <p className="text-green-600">
           Your explanation demonstrates excellent coverage and clarity!
         </p>
@@ -102,9 +123,23 @@ export const MasteryLoop: React.FC<{
         </div>
       </div>
     )
+  } else if (state.isGaming) {
+    content = (
+      <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded animate-shake animate-pulse-red">
+        <h4 className="font-medium text-red-700 mb-2">Gaming Detected!</h4>
+        <p className="text-red-600 mb-2">{state.reasoning}</p>
+        <p className="text-sm text-red-500">Clarity score forced to 0.</p>
+        <button
+          onClick={reset}
+          className="mt-3 text-indigo-600 hover:underline text-sm"
+        >
+          Try Again
+        </button>
+      </div>
+    )
   } else if (state.showHint) {
     content = (
-      <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
+      <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded animate-fade-in">
         <h4 className="font-medium text-yellow-700 mb-2">Coaching Hint</h4>
         <p className="text-yellow-600">{state.hint}</p>
         <button
@@ -118,13 +153,11 @@ export const MasteryLoop: React.FC<{
   } else if (hasScore) {
     const barColor = state.finalScore >= 90 ? "bg-green-500" : "bg-indigo-600"
     content = (
-      <div>
-        <p className="text-slate-600 mb-2">
-          Final Score: <strong>{state.finalScore}</strong>/100
-        </p>
-        <div className="bg-slate-200 h-4 w-full rounded-full">
+      <div className="animate-fade-in">
+        <AnimatedScore value={state.finalScore} label="Final Score" />
+        <div className="bg-slate-200 h-4 w-full rounded-full overflow-hidden">
           <div
-            className={`${barColor} h-4 rounded-full transition-colors`}
+            className={`${barColor} h-4 rounded-full transition-all duration-1000 ease-out`}
             style={{ width: `${state.finalScore}%` }}
           />
         </div>

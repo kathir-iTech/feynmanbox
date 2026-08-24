@@ -1,6 +1,4 @@
-"use client"
-
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 
 export interface TranscriptState {
   finalTranscript: string
@@ -16,7 +14,17 @@ export const useVoiceRecorder = () => {
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null)
+  const manuallyStoppedRef = useRef(false)
   const [isSupported, setIsSupported] = useState<boolean | null>(null)
+
+  const startRecognition = useCallback(() => {
+    if (!recognitionRef.current) return
+    try {
+      recognitionRef.current.start()
+    } catch {
+      // already started, ignore
+    }
+  }, [])
 
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,50 +34,64 @@ export const useVoiceRecorder = () => {
     if (SpeechRecognition) {
       setIsSupported(true)
       const recognition = new SpeechRecognition()
-      recognition.continuous = false
-      recognition.interimResults = false
+      recognition.continuous = true
+      recognition.interimResults = true
       recognition.lang = "en-US"
 
       recognition.onstart = () => {
-        setState((prev) => ({ ...prev, isRecording: true, interimTranscript: "" }))
+        setState((prev) => ({ ...prev, isRecording: true }))
       }
 
       recognition.onresult = (event: any) => {
-        const final: string[] = []
-        const interim: string[] = []
+        const finalParts: string[] = []
+        const interimParts: string[] = []
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript
 
           if (event.results[i].isFinal) {
-            final.push(transcript)
+            finalParts.push(transcript)
           } else {
-            interim.push(transcript)
+            interimParts.push(transcript)
           }
         }
 
         setState((prev) => ({
           ...prev,
-          finalTranscript: prev.finalTranscript + (prev.finalTranscript ? " " : "") + final.join(" "),
-          interimTranscript: interim.join(" "),
+          finalTranscript: prev.finalTranscript + (prev.finalTranscript && finalParts.length > 0 ? " " : "") + finalParts.join(" "),
+          interimTranscript: interimParts.join(" "),
         }))
       }
 
       recognition.onerror = (event: { error: string }) => {
-        setState((prev) => ({ ...prev, isRecording: false }))
-        if (event.error !== "abort") {
-          // handled gracefully
+        if (event.error === "aborted" || event.error === "no-speech") {
+          return
         }
+        console.error("Speech recognition error:", event.error)
       }
 
       recognition.onend = () => {
-        setState((prev) => ({ ...prev, isRecording: false }))
+        if (!manuallyStoppedRef.current) {
+          // Auto-restart: browsers stop continuous recognition after timeout
+          try {
+            recognition.start()
+          } catch {
+            // ignore if already started
+          }
+        } else {
+          setState((prev) => ({ ...prev, isRecording: false, interimTranscript: "" }))
+        }
       }
 
       recognitionRef.current = recognition
 
       return () => {
-        recognition.stop()
+        manuallyStoppedRef.current = true
+        try {
+          recognition.stop()
+        } catch {
+          // ignore
+        }
         recognitionRef.current = null
       }
     } else {
@@ -77,31 +99,38 @@ export const useVoiceRecorder = () => {
     }
   }, [])
 
-  const startRecording = () => {
-    if (!recognitionRef.current) return
-    try {
-      recognitionRef.current.start()
-    } catch (e) {
-      console.error("Speech recognition error:", e)
-    }
-  }
+  const startRecording = useCallback(() => {
+    manuallyStoppedRef.current = false
+    setState((prev) => ({ ...prev, finalTranscript: "", interimTranscript: "" }))
+    startRecognition()
+  }, [startRecognition])
 
-  const stopRecording = () => {
+  const stopRecording = useCallback(() => {
+    manuallyStoppedRef.current = true
     if (!recognitionRef.current) return
     try {
       recognitionRef.current.stop()
-    } catch (e) {
-      console.error("Speech recognition stop error:", e)
+    } catch {
+      // ignore
     }
-  }
+    setState((prev) => ({ ...prev, isRecording: false, interimTranscript: "" }))
+  }, [])
 
-  const resetTranscript = () => {
+  const resetTranscript = useCallback(() => {
+    manuallyStoppedRef.current = true
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+      } catch {
+        // ignore
+      }
+    }
     setState({
       finalTranscript: "",
       interimTranscript: "",
       isRecording: false,
     })
-  }
+  }, [])
 
   return {
     state,

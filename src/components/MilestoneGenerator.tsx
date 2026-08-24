@@ -41,7 +41,13 @@ export const MilestoneGenerator: React.FC<{
   }
 
   return (
-    <div className="p-6 bg-white rounded-lg shadow-sm mb-6">
+    <div className="p-6 bg-white rounded-lg shadow-sm mb-6 relative overflow-hidden">
+      {loading && (
+        <div className="absolute top-0 left-0 right-0 h-1">
+          <div className="h-full bg-indigo-500 animate-progress-bar" />
+        </div>
+      )}
+
       <h2 className="text-xl font-bold text-slate-800 mb-4">Context Anchor: Lecture Notes</h2>
 
       <textarea
