@@ -1,8 +1,8 @@
-"use client"
-
 import { useVoiceRecorder } from "../hooks/useVoiceRecorder"
 
-export const VoiceRecorder: React.FC = () => {
+export const VoiceRecorder: React.FC<{
+  onTranscriptReady: (transcript: string) => void
+}> = ({ onTranscriptReady }) => {
   const {
     state,
     isSupported,
@@ -19,7 +19,7 @@ export const VoiceRecorder: React.FC = () => {
         </div>
       )}
 
-      {isSupported && !state.isRecording && (
+      {isSupported && !state.isRecording && state.finalTranscript.length === 0 && (
         <div className="mb-4">
           <h3 className="text-semibold text-slate-800 mb-3">Voice Explanation</h3>
           <p className="text-slate-500 mb-4">
@@ -31,26 +31,6 @@ export const VoiceRecorder: React.FC = () => {
             onClick={startRecording}
             className="w-full bg-indigo-600 text-white py-3 rounded-md font-medium transition-colors hover:bg-indigo-500 active:bg-indigo-700"
           >
-            <svg
-              className="inline-block mr-2 w-5 h-5 animate-spin"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                strokeWidth="4"
-              ></circle>
-              <path
-                className="opacity-85"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-              ></path>
-            </svg>
             Start Recording
           </button>
         </div>
@@ -61,27 +41,34 @@ export const VoiceRecorder: React.FC = () => {
           <h3 className="text-semibold text-slate-800 mb-3">Listening...</h3>
           <p className="text-slate-500 mb-2">Speak clearly into your microphone</p>
           <div className="bg-slate-100 rounded p-3 max-h-[100px] overflow-y-auto">
-            <p className="text-sm text-slate-400 interstitial">{state.interimTranscript || "..."}</p>
+            <p className="text-sm text-slate-400">{state.interimTranscript || "..."}</p>
           </div>
         </div>
       )}
 
-      {state.isRecording === false && state.finalTranscript.length > 0 && (
+      {!state.isRecording && state.finalTranscript.length > 0 && (
         <div>
           <h3 className="text-semibold text-slate-800 mb-3">Transcript</h3>
           <textarea
             readOnly
             value={state.finalTranscript}
-            onClick={resetTranscript}
-            placeholder="Click to edit transcript..."
             className="w-full border border-slate-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors min-h-[120px] mb-3"
           />
-          <button
-            onClick={resetTranscript}
-            className="text-sm text-indigo-600 hover:underline"
-          >
-            Edit Transcript
-          </button>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => onTranscriptReady(state.finalTranscript)}
+              className="flex-1 bg-indigo-600 text-white py-2 rounded-md font-medium transition-colors hover:bg-indigo-500 active:bg-indigo-700"
+            >
+              Use This Transcript
+            </button>
+            <button
+              onClick={resetTranscript}
+              className="px-4 py-2 text-sm text-indigo-600 hover:underline"
+            >
+              Re-record
+            </button>
+          </div>
         </div>
       )}
     </div>

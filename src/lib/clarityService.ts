@@ -1,10 +1,6 @@
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
+import type { ClarityResult } from "../types"
 
-export interface ClarityResult {
-  clarity_score: number
-  is_gaming_attempt: boolean
-  reasoning: string
-}
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
 
 export async function rateClarity(
   transcript: string,

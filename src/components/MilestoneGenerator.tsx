@@ -1,80 +1,44 @@
-/* eslint-disable react/only-export-components */
-
 import { useState } from "react"
 import { generateMilestones } from "../lib/milestoneService"
-import type { MilestoneState } from "../types"
+import type { Milestone } from "../types"
 
-export const useMilestoneGenerator = () => {
-  const [state, setState] = useState<MilestoneState>({
-    success: false,
-    milestones: [],
-    error: null,
-    loading: false,
-  })
+export const MilestoneGenerator: React.FC<{
+  onMilestonesGenerated: (milestones: Milestone[]) => void
+}> = ({ onMilestonesGenerated }) => {
+  const [notes, setNotes] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const [apiKey, _setApiKey] = useState(() => {
-    // Read from environment variable
-    return import.meta.env.VITE_GEMINI_API_KEY
-  })
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
-  const generate = async (notes: string) => {
+  const generate = async () => {
     if (!notes.trim()) {
-      setState({
-        success: false,
-        milestones: [],
-        error: "Please paste lecture notes first",
-        loading: false,
-      })
+      setError("Please paste lecture notes first")
       return
     }
 
     if (!apiKey) {
-      setState({
-        success: false,
-        milestones: [],
-        error: "Gemini API key not configured. Check .env file.",
-        loading: false,
-      })
+      setError("Gemini API key not configured. Check Vercel environment variables.")
       return
     }
 
-    setState({ ...state, loading: true, error: null })
+    setLoading(true)
+    setError(null)
 
     try {
       const result = await generateMilestones(notes, apiKey)
-      setState(result)
-    } catch (err: any) {
-      setState({
-        success: false,
-        milestones: [],
-        error: err.message || "Unexpected error. Please try again.",
-        loading: false,
-      })
+      if (result.success) {
+        onMilestonesGenerated(result.milestones)
+      } else {
+        setError(result.error || "Failed to generate milestones.")
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unexpected error. Please try again."
+      setError(message)
+    } finally {
+      setLoading(false)
     }
   }
-
-  const retry = () => {
-    // Keep current state but clear error, allow regeneration
-    setState({
-      success: state.success,
-      milestones: state.milestones,
-      error: null,
-      loading: false,
-    })
-  }
-
-  return {
-    state,
-    generate,
-    retry,
-  }
-}
-
-/* eslint-enable react/only-export-components */
-
-export const MilestoneGenerator: React.FC = () => {
-  const { state, generate, retry } = useMilestoneGenerator()
-  const [notes, setNotes] = useState("")
 
   return (
     <div className="p-6 bg-white rounded-lg shadow-sm mb-6">
@@ -90,62 +54,28 @@ export const MilestoneGenerator: React.FC = () => {
 
       <div className="mt-4">
         <button
-          onClick={() => generate(notes)}
-          disabled={!notes.trim() || state.loading || !import.meta.env.VITE_GEMINI_API_KEY}
+          onClick={generate}
+          disabled={!notes.trim() || loading || !apiKey}
           className={`px-6 py-2 rounded-md font-medium transition-colors ${
-            state.loading || !notes.trim() || !import.meta.env.VITE_GEMINI_API_KEY
+            loading || !notes.trim() || !apiKey
               ? "bg-slate-200 text-slate-500 cursor-not-allowed"
               : "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700"
           }`}
         >
-          {state.loading
+          {loading
             ? "Generating milestones..."
-            : notes.trim() && import.meta.env.VITE_GEMINI_API_KEY
-              ? "Generate 3 Milestones"
-              : "Enter notes and set API key"}
+            : "Generate 3 Milestones"}
         </button>
       </div>
 
-      {state.loading && (
-        <p className="mt-3 text-sm text-slate-500">Calling Gemini 1.5 Flash...</p>
+      {loading && (
+        <p className="mt-3 text-sm text-slate-500">Calling Gemini Flash...</p>
       )}
 
-      {state.error && !state.loading && (
+      {error && (
         <div className="mt-4 p-3 rounded bg-red-100 text-red-800 text-sm mb-4">
-          {state.error}
+          {error}
         </div>
-      )}
-
-      {state.success && !state.loading && (
-        <div className="mt-6">
-          <h3 className="text-semibold text-slate-800 mb-3">Generated Milestones</h3>
-          <div className="space-y-2">
-            {state.milestones.map((milestone) => (
-              <div
-                key={milestone.id}
-                className="flex items-center justify-between p-3 rounded bg-slate-50"
-              >
-                <span className="text-slate-700">{milestone.text}</span>
-                <svg
-                  className="w-5 h-5 text-indigo-400"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <path d="M9 18l6-6-6-6M9 6l6 6 6-6" />
-                </svg>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {state.error && state.loading && (
-        <button
-          onClick={retry}
-          className="mt-3 px-4 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700 text-sm"
-        >
-          Retry
-        </button>
       )}
     </div>
   )

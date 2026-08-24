@@ -1,5 +1,3 @@
-"use client"
-
 import "./index.css"
 import { MilestoneGenerator } from "./components/MilestoneGenerator"
 import { VoiceRecorder } from "./components/VoiceRecorder"
@@ -13,23 +11,20 @@ import { useState } from "react"
 export default function App() {
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const [transcript, setTranscript] = useState<string>("")
-  const [showCoverage, setShowCoverage] = useState(false)
   const [showClarity, setShowClarity] = useState(false)
   const [isMastered, setIsMastered] = useState(false)
 
   const handleCoverageComplete = () => {
     setShowClarity(true)
-    setTranscript("")
   }
 
-  const handleMastery = (isMastered: boolean) => {
-    setIsMastered(isMastered)
+  const handleMastery = (mastered: boolean) => {
+    setIsMastered(mastered)
   }
 
   const handleReset = () => {
     setMilestones([])
     setTranscript("")
-    setShowCoverage(false)
     setShowClarity(false)
     setIsMastered(false)
   }
@@ -42,23 +37,17 @@ export default function App() {
         </h1>
 
         {milestones.length === 0 && (
-          <MilestoneGenerator />
+          <MilestoneGenerator onMilestonesGenerated={setMilestones} />
         )}
 
         {milestones.length > 0 && !transcript && (
-          <VoiceRecorder />
+          <VoiceRecorder onTranscriptReady={setTranscript} />
         )}
 
-        {milestones.length > 0 && transcript && !showCoverage && (
+        {milestones.length > 0 && transcript && !showClarity && (
           <CoverageDisplay
             milestones={milestones}
-            onEvaluated={handleCoverageComplete}
-          />
-        )}
-
-        {showCoverage && milestones.length > 0 && transcript && (
-          <CoverageDisplay
-            milestones={milestones}
+            transcript={transcript}
             onEvaluated={handleCoverageComplete}
           />
         )}
