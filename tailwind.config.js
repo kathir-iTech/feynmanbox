@@ -33,20 +33,12 @@ export default {
         panel: "4px",
       },
       animation: {
-        "wave-sine": "waveSine 2s ease-in-out infinite",
         "progress-bar": "progressBar 1.5s ease-in-out infinite",
         "shake": "shake 0.5s ease-in-out",
         "fade-in": "fadeIn 0.5s ease-out forwards",
         "pulse-red": "pulseRed 0.6s ease-in-out 3",
-        "slide-in": "slideIn 0.3s ease-out forwards",
-        "border-flash": "borderFlash 0.5s ease-in-out 3",
       },
       keyframes: {
-        waveSine: {
-          "0%": { d: "path('M 0 20 Q 25 10 50 20 T 100 20 T 150 20 T 200 20')" },
-          "50%": { d: "path('M 0 20 Q 25 5 50 20 T 100 20 T 150 20 T 200 20')" },
-          "100%": { d: "path('M 0 20 Q 25 10 50 20 T 100 20 T 150 20 T 200 20')" },
-        },
         progressBar: {
           "0%": { transform: "translateX(-100%)" },
           "50%": { transform: "translateX(0%)" },
@@ -64,14 +56,6 @@ export default {
         pulseRed: {
           "0%, 100%": { boxShadow: "0 0 0 0 rgba(196, 69, 61, 0)" },
           "50%": { boxShadow: "0 0 20px 4px rgba(196, 69, 61, 0.4)" },
-        },
-        slideIn: {
-          "0%": { opacity: "0", transform: "translateX(-8px)" },
-          "100%": { opacity: "1", transform: "translateX(0)" },
-        },
-        borderFlash: {
-          "0%, 100%": { borderColor: "#2A333D" },
-          "50%": { borderColor: "#C4453D" },
         },
       },
     },

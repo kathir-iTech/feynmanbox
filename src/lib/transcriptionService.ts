@@ -1,9 +1,6 @@
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
-
 export async function transcribeAudio(
   base64Audio: string,
   mimeType: string,
-  apiKey: string
 ): Promise<string> {
   const payload = {
     contents: [
@@ -26,12 +23,12 @@ export async function transcribeAudio(
     },
   }
 
-  const response = await fetch(`${API_BASE}?key=${apiKey}`, {
+  const response = await fetch("/api/gemini", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ model: "gemini-flash-lite-latest", payload }),
   })
 
   if (!response.ok) {

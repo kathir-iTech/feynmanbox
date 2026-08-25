@@ -31,8 +31,6 @@ export const VoiceRecorder: React.FC<{
   const liveRecognitionRef = useRef<any>(null)
   const liveFinalRef = useRef<string>("")
 
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
-
   // If editing an existing transcript, show it immediately
   useEffect(() => {
     if (initialTranscript && initialTranscript.trim()) {
@@ -221,17 +219,12 @@ export const VoiceRecorder: React.FC<{
           return
         }
 
-        // Transcribe via Gemini — FIX 2: correct MIME, higher accuracy
-        if (!apiKey) {
-          setError("Transcription is temporarily unavailable. Please try again later.")
-          return
-        }
+        // Transcribe via Gemini — via server proxy
         setIsTranscribing(true)
         try {
           const base64 = await blobToBase64(blob)
-          // FIX 2: ensure MIME matches actual MediaRecorder output (base type)
           const apiMime = mimeType.split(";")[0].trim() || "audio/webm"
-          const transcript = await transcribeAudio(base64, apiMime, apiKey)
+          const transcript = await transcribeAudio(base64, apiMime)
           setEditableTranscript(transcript)
           setHasRecording(true)
         } catch (err: unknown) {
@@ -290,6 +283,25 @@ export const VoiceRecorder: React.FC<{
         }
       } catch {}
     } catch (err: unknown) {
+      // Mic leak fix: if getUserMedia succeeded but MediaRecorder construction failed,
+      // the stream is already acquired and must be stopped explicitly
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop())
+        streamRef.current = null
+      }
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+        animationRef.current = null
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+        audioContextRef.current.close().catch(() => {})
+        audioContextRef.current = null
+      }
+      analyserRef.current = null
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current)
+        timerRef.current = null
+      }
       const msg = err instanceof Error ? err.message : "Microphone access denied."
       if ((err as any)?.name === "NotAllowedError") {
         setError("Microphone access was denied. Please allow microphone permission and try again.")

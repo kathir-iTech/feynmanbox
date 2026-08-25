@@ -3,8 +3,7 @@ import { DocumentUpload } from "./components/DocumentUpload"
 import { VoiceRecorder } from "./components/VoiceRecorder"
 import { ExportFeature } from "./components/ExportFeature"
 import type { Milestone } from "./types"
-import { useState, useEffect } from "react"
-import { extractTextFromFile } from "./lib/fileExtractor"
+import { useState, useEffect, useRef } from "react"
 import { generateMilestones } from "./lib/milestoneService"
 import { evaluateCombined, type CombinedEvaluationResult } from "./lib/combinedEvaluationService"
 
@@ -122,16 +121,15 @@ export default function App() {
 
   // Block 1: Document upload + background processing
   const [hasDocument, setHasDocument] = useState(false)
-  const [notesText, setNotesText] = useState<string>("")
   const [fileName, setFileName] = useState<string | null>(null)
   const [documentStatus, setDocumentStatus] = useState<"idle" | "extracting" | "generating" | "ready" | "error">("idle")
   const [documentError, setDocumentError] = useState<string | null>(null)
   // Block 6: Back navigation — preserve data when going back
   const [isEditingTranscript, setIsEditingTranscript] = useState(false)
-  // suppress unused var until Block 4 needs it visibly
-  void notesText
-
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
+  // Generation / evaluation tokens to guard against stale async results
+  const milestoneGenIdRef = useRef(0)
+  const evalGenIdRef = useRef(0)
+  const evalInFlightRef = useRef(false)
 
   useEffect(() => {
     try {
@@ -159,16 +157,18 @@ export default function App() {
       setDocumentError("No readable text found. Please try another file or paste your notes.")
       return
     }
-    setNotesText(text)
-    if (!apiKey) {
-      setDocumentStatus("error")
-      setDocumentError("Preparation is temporarily unavailable. Please try again later.")
-      return
-    }
+    const genId = ++milestoneGenIdRef.current
     setDocumentStatus("generating")
     try {
-      const result = await generateMilestones(text, apiKey)
+      const result = await generateMilestones(text)
+      if (genId !== milestoneGenIdRef.current) return
       if (result.success) {
+        if (!result.milestones || result.milestones.length === 0) {
+          setDocumentStatus("error")
+          setDocumentError("We couldn't extract any key concepts from those notes. Please try a different document or add more detail.")
+          setMilestones([])
+          return
+        }
         setMilestones(result.milestones)
         setDocumentStatus("ready")
         setDocumentError(null)
@@ -177,29 +177,35 @@ export default function App() {
         setDocumentError(result.error || "We couldn't prepare your milestones. Please try again.")
       }
     } catch (err: unknown) {
+      if (genId !== milestoneGenIdRef.current) return
       const msg = err instanceof Error ? err.message : "We couldn't complete the request. Please try again."
       setDocumentStatus("error")
       setDocumentError(msg)
     }
   }
 
-  const handleFileSelected = (file: File) => {
+  const handleFileSelected = async (file: File) => {
     // Immediate transition — don't block UI
     setHasDocument(true)
     setFileName(file.name)
     setDocumentStatus("extracting")
     setDocumentError(null)
     setMilestones([])
-    // Background extraction
-    extractTextFromFile(file)
-      .then((text) => {
-        return processNotesToMilestones(text)
-      })
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : "We couldn't read that file. Please try another file or paste your notes."
-        setDocumentStatus("error")
-        setDocumentError(msg)
-      })
+    const genId = milestoneGenIdRef.current + 1
+    milestoneGenIdRef.current = genId
+    // Background extraction - lazy load heavy libs
+    try {
+      const { extractTextFromFile } = await import("./lib/fileExtractor")
+      const fileGenId = milestoneGenIdRef.current
+      const text = await extractTextFromFile(file)
+      if (fileGenId !== milestoneGenIdRef.current) return
+      return processNotesToMilestones(text)
+    } catch (err: unknown) {
+      if (genId !== milestoneGenIdRef.current) return
+      const msg = err instanceof Error ? err.message : "We couldn't read that file. Please try another file or paste your notes."
+      setDocumentStatus("error")
+      setDocumentError(msg)
+    }
   }
 
   const handlePasteText = (text: string) => {
@@ -216,23 +222,27 @@ export default function App() {
 
   const runCombinedEvaluation = async (currentTranscript: string, currentMilestones: Milestone[]) => {
     if (!currentTranscript.trim() || currentMilestones.length === 0) return
-    if (!apiKey) {
-      setEvaluationError("Analysis is temporarily unavailable. Please try again later.")
-      return
-    }
+    if (evalInFlightRef.current) return
+    evalInFlightRef.current = true
+    const evalId = ++evalGenIdRef.current
     setIsEvaluating(true)
     setEvaluationError(null)
     setCombinedResult(null)
     try {
-      const result = await evaluateCombined(currentMilestones, currentTranscript, apiKey)
+      const result = await evaluateCombined(currentMilestones, currentTranscript)
+      if (evalId !== evalGenIdRef.current) return
       setCombinedResult(result)
       setEvaluationError(null)
     } catch (err: unknown) {
+      if (evalId !== evalGenIdRef.current) return
       const msg = err instanceof Error ? err.message : "We couldn't complete the analysis. Please try again."
       setEvaluationError(msg)
       setCombinedResult(null)
     } finally {
-      setIsEvaluating(false)
+      if (evalId === evalGenIdRef.current) {
+        setIsEvaluating(false)
+      }
+      evalInFlightRef.current = false
     }
   }
 
@@ -274,6 +284,9 @@ export default function App() {
   }, [combinedResult, milestones, transcript, hasSaved, historyEntries])
 
   const handleReset = () => {
+    milestoneGenIdRef.current += 1
+    evalGenIdRef.current += 1
+    evalInFlightRef.current = false
     setMilestones([])
     setTranscript("")
     setCombinedResult(null)
@@ -282,7 +295,6 @@ export default function App() {
     setHasSaved(false)
     setHistoryOpen(false)
     setHasDocument(false)
-    setNotesText("")
     setFileName(null)
     setDocumentStatus("idle")
     setDocumentError(null)
@@ -290,6 +302,8 @@ export default function App() {
   }
 
   const handleBackToUpload = () => {
+    evalGenIdRef.current += 1
+    evalInFlightRef.current = false
     setHasDocument(false)
     setIsEditingTranscript(false)
     setTranscript("")
@@ -299,6 +313,8 @@ export default function App() {
   }
 
   const handleBackToTranscript = () => {
+    evalGenIdRef.current += 1
+    evalInFlightRef.current = false
     setCombinedResult(null)
     setIsEvaluating(false)
     setEvaluationError(null)
@@ -306,20 +322,24 @@ export default function App() {
   }
 
   const handleTranscriptReady = (newTranscript: string) => {
+    evalGenIdRef.current += 1
+    evalInFlightRef.current = false
     setTranscript(newTranscript)
     setIsEditingTranscript(false)
     setCombinedResult(null)
     setIsEvaluating(false)
     setEvaluationError(null)
     setHasSaved(false)
-    // FIX 3: evaluation will auto-run via useEffect when milestones ready
   }
 
   const handleRetryEvaluation = () => {
+    evalGenIdRef.current += 1
+    evalInFlightRef.current = false
     setEvaluationError(null)
     setCombinedResult(null)
     if (transcript && milestones.length > 0) {
-      runCombinedEvaluation(transcript, milestones)
+      // delay to allow state to settle before re-evaluating
+      setTimeout(() => runCombinedEvaluation(transcript, milestones), 0)
     }
   }
 

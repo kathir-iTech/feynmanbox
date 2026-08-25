@@ -15,12 +15,19 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
 
   const acceptTypes = ".pdf,.docx,.txt"
 
+  const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+  const [fileError, setFileError] = useState<string | null>(null)
+
   const handleFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return
     const file = files[0]
+    if (file.size > MAX_FILE_SIZE) {
+      setFileError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum size is 10MB.`)
+      return
+    }
+    setFileError(null)
     const valid = file.name.toLowerCase().match(/\.(pdf|docx|txt)$/)
     if (!valid) {
-      // Let parent handle error via status; but show immediate feedback
       onFileSelected(file) // will trigger unsupported error in extractor
       return
     }
@@ -83,9 +90,9 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
         </div>
       </div>
 
-      {error && (
+      {(fileError || error) && (
         <div className="mt-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
-          {error}
+          {fileError || error}
         </div>
       )}
 

@@ -11,13 +11,6 @@ export interface MilestoneState {
   loading: boolean
 }
 
-export interface CoverageState {
-  covered: boolean[]
-  coverageScore: number
-  error: string | null
-  loading: boolean
-}
-
 export interface CoverageDetail {
   concept: string
   covered: boolean
@@ -27,24 +20,7 @@ export interface CoverageDetail {
 export interface CoverageResult {
   details: CoverageDetail[]
   coverage_score: number
-  // backward compat for simple boolean array
   milestones_covered?: boolean[]
-}
-
-export interface TranscriptState {
-  finalTranscript: string
-  interimTranscript: string
-  isRecording: boolean
-}
-
-export interface EvaluationResult {
-  coverageScore: number
-  clarityScore: number
-  isGaming: boolean
-  reasoning: string
-  finalScore: number
-  masteryVerified: boolean
-  hint: string | null
 }
 
 export interface ClarityResult {

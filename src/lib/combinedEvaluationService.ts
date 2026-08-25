@@ -1,8 +1,6 @@
 import type { CoverageDetail, Milestone } from "../types"
 import { parseGeminiJson } from "./parseGeminiJson"
 
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent"
-
 export interface CombinedEvaluationResult {
   coverage_score: number
   clarity_score: number
@@ -16,7 +14,6 @@ export interface CombinedEvaluationResult {
 export async function evaluateCombined(
   milestones: Milestone[],
   transcript: string,
-  apiKey: string
 ): Promise<CombinedEvaluationResult> {
   const milestonesText = milestones.map((m, i) => `${i + 1}. ${m.text}`).join("\n")
 
@@ -53,12 +50,12 @@ Include exactly ${milestones.length} items in details, in same order as concepts
     },
   }
 
-  const response = await fetch(`${API_BASE}?key=${apiKey}`, {
+  const response = await fetch("/api/gemini", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ model: "gemini-flash-lite-latest", payload }),
   })
 
   if (!response.ok) {
