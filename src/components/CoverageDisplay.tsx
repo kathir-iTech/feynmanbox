@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { checkCoverage } from "../lib/coverageService"
 import type { Milestone } from "../types"
 
@@ -12,41 +12,76 @@ export const CoverageDisplay: React.FC<{
     coverageScore: number
     loading: boolean
     error: string | null
+    evaluated: boolean
   }>({
     covered: milestones.map(() => false),
     coverageScore: 0,
     loading: false,
     error: null,
+    evaluated: false,
   })
 
   const inFlightRef = useRef(false)
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
+  // Reset when transcript or milestones change (new recording / new milestones)
+  useEffect(() => {
+    setState({
+      covered: milestones.map(() => false),
+      coverageScore: 0,
+      loading: false,
+      error: null,
+      evaluated: false,
+    })
+  }, [transcript, milestones])
+
   const evaluate = async () => {
-    if (inFlightRef.current) return
+    console.log("[CoverageDisplay] button onClick → evaluate() fired", {
+      hasTranscript: !!transcript.trim(),
+      transcriptLength: transcript.length,
+      transcriptPreview: transcript.substring(0, 80),
+      hasApiKey: !!apiKey,
+      apiKeyPrefix: apiKey ? apiKey.substring(0, 8) + "…" : "(none)",
+      inFlight: inFlightRef.current,
+    })
+
+    if (inFlightRef.current) {
+      console.log("[CoverageDisplay] Ignoring click — request already in flight")
+      return
+    }
 
     if (!transcript.trim()) {
+      console.warn("[CoverageDisplay] No transcript to evaluate")
       setState((prev) => ({ ...prev, error: "[ERROR] No transcript provided" }))
       return
     }
 
     if (!apiKey) {
+      console.warn("[CoverageDisplay] API key missing")
       setState((prev) => ({ ...prev, error: "[ERROR] API key not configured" }))
       return
     }
 
     inFlightRef.current = true
     setState((prev) => ({ ...prev, loading: true, error: null }))
+    console.log("[CoverageDisplay] → calling checkCoverage(milestones, transcript, apiKey)")
 
     try {
       const result = await checkCoverage(milestones, transcript, apiKey)
+      console.log("[CoverageDisplay] ← checkCoverage SUCCESS, raw result:", result)
+      // Temporary log required by Issue 3 — proves parse succeeded and data is used
+      console.log("[CoverageDisplay] parsed milestones_covered:", result.milestones_covered, "coverage_score:", result.coverage_score)
+      console.log("[CoverageDisplay] → setState({ covered, coverageScore, evaluated:true }) — UI should update now")
       setState({
         covered: result.milestones_covered,
         coverageScore: result.coverage_score,
         loading: false,
         error: null,
+        evaluated: true,
       })
+      console.log("[CoverageDisplay] UI state updated — coverageScore displayed should be", result.coverage_score)
     } catch (err: unknown) {
+      console.error("[CoverageDisplay] ← checkCoverage FAILED:", err)
       const message = err instanceof Error ? err.message : "Unexpected error"
       setState((prev) => ({
         ...prev,
@@ -54,11 +89,23 @@ export const CoverageDisplay: React.FC<{
         coverageScore: 0,
         loading: false,
         error: message,
+        evaluated: false,
       }))
+      console.log("[CoverageDisplay] error state set, UI should show red error box with message:", message)
     } finally {
       inFlightRef.current = false
+      console.log("[CoverageDisplay] evaluate() finally — inFlight reset to false")
     }
   }
+
+  // Debug trace: log render state each time
+  console.log("[CoverageDisplay] render", {
+    transcriptLength: transcript.length,
+    loading: state.loading,
+    evaluated: state.evaluated,
+    coverageScore: state.coverageScore,
+    error: state.error,
+  })
 
   return (
     <div className={`panel p-6 relative overflow-hidden ${
@@ -103,7 +150,7 @@ export const CoverageDisplay: React.FC<{
         </div>
       )}
 
-      {state.coverageScore > 0 && !state.loading && (
+      {state.evaluated && !state.loading && (
         <div className="mt-6 animate-fade-in">
           <div className="flex items-baseline gap-3 mb-2">
             <span className="label-tag">Coverage</span>
@@ -160,7 +207,7 @@ export const CoverageDisplay: React.FC<{
         </div>
       )}
 
-      {state.coverageScore > 0 && !state.loading && (
+      {state.evaluated && !state.loading && (
         <button onClick={onEvaluated} className="btn-primary w-full mt-6">
           Proceed to Clarity Check
         </button>

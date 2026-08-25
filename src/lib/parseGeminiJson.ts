@@ -1,6 +1,7 @@
 /**
  * Strips markdown code fences (```json ... ```) that Gemini sometimes wraps
  * around JSON responses, then parses the result.
+ * Attempts to extract the first JSON object if extra prose surrounds it.
  */
 export function parseGeminiJson<T>(text: string): T {
   let cleaned = text.trim()
@@ -17,5 +18,18 @@ export function parseGeminiJson<T>(text: string): T {
     cleaned = singleLineMatch[1].trim()
   }
 
-  return JSON.parse(cleaned) as T
+  try {
+    return JSON.parse(cleaned) as T
+  } catch (firstErr) {
+    // Fallback: try to locate the first balanced JSON object in the text
+    const jsonObjectMatch = cleaned.match(/\{[\s\S]*\}/)
+    if (jsonObjectMatch) {
+      try {
+        return JSON.parse(jsonObjectMatch[0]) as T
+      } catch {
+        // fall through to throw original error
+      }
+    }
+    throw firstErr
+  }
 }

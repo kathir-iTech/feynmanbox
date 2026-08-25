@@ -35,22 +35,44 @@ export const ClarityDisplay: React.FC<{
     reasoning: string
     loading: boolean
     error: string | null
+    evaluated: boolean
   }>({
     clarityScore: 0,
     isGaming: false,
     reasoning: "",
     loading: false,
     error: null,
+    evaluated: false,
   })
 
   const inFlightRef = useRef(false)
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
+  useEffect(() => {
+    setState({
+      clarityScore: 0,
+      isGaming: false,
+      reasoning: "",
+      loading: false,
+      error: null,
+      evaluated: false,
+    })
+  }, [transcript])
+
   const evaluate = async () => {
-    if (inFlightRef.current) return
+    console.log("[ClarityDisplay] button onClick → evaluate() fired", {
+      hasTranscript: !!transcript.trim(),
+      transcriptLength: transcript.length,
+      hasApiKey: !!apiKey,
+    })
+
+    if (inFlightRef.current) {
+      console.log("[ClarityDisplay] Ignoring click — in flight")
+      return
+    }
 
     if (!transcript.trim()) {
-      setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: "[ERROR] No transcript" })
+      setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: "[ERROR] No transcript", evaluated: false })
       return
     }
 
@@ -61,9 +83,12 @@ export const ClarityDisplay: React.FC<{
 
     inFlightRef.current = true
     setState((prev) => ({ ...prev, loading: true, error: null }))
+    console.log("[ClarityDisplay] → calling rateClarity")
 
     try {
       const result: ClarityResult = await rateClarity(transcript, apiKey)
+      console.log("[ClarityDisplay] ← rateClarity result:", result)
+      console.log("[ClarityDisplay] parsed object:", result)
       const finalClarity = result.is_gaming_attempt ? 0 : result.clarity_score
       setState({
         clarityScore: finalClarity,
@@ -71,13 +96,13 @@ export const ClarityDisplay: React.FC<{
         reasoning: result.reasoning,
         loading: false,
         error: null,
+        evaluated: true,
       })
-      if (result.is_gaming_attempt && onNext) {
-        onNext()
-      }
+      console.log("[ClarityDisplay] UI should now show", result.is_gaming_attempt ? "FLAGGED" : `Clarity ${finalClarity}%`)
     } catch (err: unknown) {
+      console.error("[ClarityDisplay] FAILED:", err)
       const message = err instanceof Error ? err.message : "Unexpected error"
-      setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: message })
+      setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: message, evaluated: false })
     } finally {
       inFlightRef.current = false
     }
@@ -134,7 +159,7 @@ export const ClarityDisplay: React.FC<{
         </div>
       )}
 
-      {state.clarityScore > 0 && !state.isGaming && !state.loading && (
+      {state.evaluated && !state.isGaming && !state.loading && (
         <div className="mt-6 animate-fade-in">
           <div className="flex items-baseline gap-3 mb-2">
             <span className="label-tag">Clarity</span>
@@ -155,7 +180,7 @@ export const ClarityDisplay: React.FC<{
         </div>
       )}
 
-      {(state.clarityScore > 0 || state.isGaming) && !state.loading && (
+      {state.evaluated && !state.loading && (
         <button onClick={onNext} className="btn-primary w-full mt-6">
           Proceed
         </button>
