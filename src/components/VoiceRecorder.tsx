@@ -134,7 +134,15 @@ export const VoiceRecorder: React.FC<{
     chunksRef.current = []
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 48000,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
       streamRef.current = stream
 
       // Setup waveform
@@ -165,7 +173,7 @@ export const VoiceRecorder: React.FC<{
         mimeType = "audio/mp4"
       }
 
-      const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 } as MediaRecorderOptions)
+      const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 192000 } as MediaRecorderOptions)
       mediaRecorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {
@@ -234,7 +242,7 @@ export const VoiceRecorder: React.FC<{
         }
       }
 
-      recorder.start(100)
+      recorder.start()
       setIsRecording(true)
 
       // Timer
@@ -243,6 +251,7 @@ export const VoiceRecorder: React.FC<{
       }, 1000)
 
       // FIX 1: Start lightweight live captions (Web Speech, visual only, parallel — discarded after)
+      // No debouncing/throttling: every onresult is processed immediately
       try {
         const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
         if (SpeechRecognition) {

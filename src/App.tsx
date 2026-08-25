@@ -448,15 +448,12 @@ export default function App() {
                 <span className="score-display">{finalScore}</span>
                 <span className="label-tag">/100</span>
               </div>
-              <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-2">
+              <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-4">
                 <div
                   className={`h-full transition-all duration-1000 ease-out ${isMastered ? "bg-verified" : combinedResult.is_gaming_attempt ? "bg-flagged" : "bg-brass"}`}
                   style={{ width: `${finalScore}%` }}
                 />
               </div>
-              <p className="font-mono text-xs text-parchment-muted mb-4">
-                Coverage {combinedResult.coverage_score}% × 0.6 + Clarity {combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score}% × 0.4
-              </p>
 
               {/* FIX 4: Brief overall summary */}
               <div className="p-4 rounded-panel border border-brass/20 bg-brass/5 mb-6">
