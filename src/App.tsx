@@ -2,10 +2,11 @@ import "./index.css"
 import { DocumentUpload } from "./components/DocumentUpload"
 import { VoiceRecorder } from "./components/VoiceRecorder"
 import { ExportFeature } from "./components/ExportFeature"
-import type { Milestone } from "./types"
+import type { Milestone, CoverageDetail } from "./types"
 import { useState, useEffect, useRef } from "react"
 import { generateMilestones } from "./lib/milestoneService"
 import { evaluateCombined, type CombinedEvaluationResult } from "./lib/combinedEvaluationService"
+import { generateFollowUpQuestion } from "./lib/followUpService"
 
 interface HistoryEntry {
   id: string
@@ -16,6 +17,51 @@ interface HistoryEntry {
   finalScore: number
   transcript: string
   isGaming: boolean
+  fingerprint: string
+  details: CoverageDetail[]
+}
+
+function simpleHash(str: string): string {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const chr = str.charCodeAt(i)
+    hash = (hash << 5) - hash + chr
+    hash |= 0
+  }
+  return Math.abs(hash).toString(36)
+}
+
+function computeFingerprint(milestones: Milestone[]): string {
+  const joined = milestones.map((m) => m.text).join("|")
+  return simpleHash(joined)
+}
+
+function Sparkline({ scores }: { scores: number[] }) {
+  if (scores.length < 2) return null
+  const width = 120
+  const height = 32
+  const padding = 4
+  const max = 100
+  const min = 0
+  const range = max - min || 1
+  const stepX = (width - padding * 2) / (scores.length - 1)
+  const points = scores
+    .map((score, idx) => {
+      const x = padding + idx * stepX
+      const y = height - padding - ((score - min) / range) * (height - padding * 2)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(" ")
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
+      <polyline fill="none" stroke="#C9962C" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" points={points} />
+      {scores.map((score, idx) => {
+        const x = padding + idx * stepX
+        const y = height - padding - ((score - min) / range) * (height - padding * 2)
+        return <circle key={idx} cx={x} cy={y} r="2.5" fill="#C9962C" />
+      })}
+    </svg>
+  )
 }
 
 function HeaderBar({ onNewSession, onHistory, hasHistory }: { onNewSession: () => void; onHistory: () => void; hasHistory: boolean }) {
@@ -123,32 +169,79 @@ function HistoryPanel({ entries, onClose, onClear }: { entries: HistoryEntry[]; 
           </div>
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-              {entries.slice().reverse().map((entry) => (
-                <div key={entry.id} className="p-4 rounded-panel border border-ink-border bg-ink">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-mono text-xs text-brass">
-                      {new Date(entry.date).toLocaleString()}
-                    </span>
-                    <span className={`font-mono text-xs font-bold ${entry.finalScore >= 80 ? "text-verified" : entry.isGaming ? "text-flagged" : "text-parchment-muted"}`}>
-                      {entry.finalScore}/100
-                    </span>
-                  </div>
-                  <div className="mb-2">
-                    <h3 className="label-tag text-[10px] mb-1">Milestones</h3>
-                    <ul className="space-y-1">
-                      {entry.milestones.map((m) => (
-                        <li key={m.id} className="font-mono text-xs text-parchment-muted truncate">• {m.text}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div className="flex gap-4 font-mono text-xs text-parchment-muted">
-                    <span>Coverage {entry.coverageScore}%</span>
-                    <span>Clarity {entry.isGaming ? 0 : entry.clarityScore}%{entry.isGaming ? " (flagged)" : ""}</span>
-                    <span className="text-parchment">Final {entry.finalScore}%</span>
-                  </div>
-                </div>
-              ))}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {(() => {
+                // Group by fingerprint
+                const groups = new Map<string, HistoryEntry[]>()
+                for (const entry of entries) {
+                  const fp = entry.fingerprint || computeFingerprint(entry.milestones)
+                  if (!groups.has(fp)) groups.set(fp, [])
+                  groups.get(fp)!.push(entry)
+                }
+                const groupEntries = Array.from(groups.entries())
+                return groupEntries.map(([fp, group]) => {
+                  const sorted = [...group].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                  const scores = sorted.map((e) => e.finalScore)
+                  const showSparkline = sorted.length >= 2
+                  return (
+                    <div key={fp} className="space-y-2">
+                      {showSparkline && (
+                        <div className="p-3 rounded-panel border border-brass/20 bg-brass/5">
+                          <p className="font-mono text-[10px] text-brass mb-2">
+                            Attempt {sorted.map((_, i) => i + 1).join(" → ")}: {scores.join(" → ")}
+                          </p>
+                          <Sparkline scores={scores} />
+                        </div>
+                      )}
+                      {sorted
+                        .slice()
+                        .reverse()
+                        .map((entry) => (
+                          <div key={entry.id} className="p-4 rounded-panel border border-ink-border bg-ink">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-mono text-xs text-brass">{new Date(entry.date).toLocaleString()}</span>
+                              <span
+                                className={`font-mono text-xs font-bold ${entry.finalScore >= 80 ? "text-verified" : entry.isGaming ? "text-flagged" : "text-parchment-muted"}`}
+                              >
+                                {entry.finalScore}/100
+                              </span>
+                            </div>
+                            <div className="mb-2">
+                              <h3 className="label-tag text-[10px] mb-1">Milestones</h3>
+                              <ul className="space-y-1">
+                                {entry.milestones.map((m) => (
+                                  <li key={m.id} className="font-mono text-xs text-parchment-muted truncate">• {m.text}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            {entry.details && entry.details.length > 0 && (
+                              <div className="mb-2">
+                                <h4 className="label-tag text-[10px] mb-1">Coverage Details</h4>
+                                <ul className="space-y-1">
+                                  {entry.details.slice(0, 3).map((d, i) => (
+                                    <li key={i} className="font-mono text-[10px] text-parchment-muted truncate">
+                                      {d.covered ? "✓" : "—"} {d.concept.slice(0, 60)}{d.concept.length > 60 ? "…" : ""}
+                                    </li>
+                                  ))}
+                                  {entry.details.length > 3 && (
+                                    <li className="font-mono text-[10px] text-parchment-muted">+{entry.details.length - 3} more</li>
+                                  )}
+                                </ul>
+                              </div>
+                            )}
+                            <div className="flex gap-4 font-mono text-xs text-parchment-muted">
+                              <span>Coverage {entry.coverageScore}%</span>
+                              <span>
+                                Clarity {entry.isGaming ? 0 : entry.clarityScore}%{entry.isGaming ? " (flagged)" : ""}
+                              </span>
+                              <span className="text-parchment">Final {entry.finalScore}%</span>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )
+                })
+              })()}
             </div>
             <button onClick={onClear} className="mt-4 btn-ghost w-full text-xs">
               Clear History
@@ -181,6 +274,13 @@ export default function App() {
   const milestoneGenIdRef = useRef(0)
   const evalGenIdRef = useRef(0)
   const evalInFlightRef = useRef(false)
+  // Phase 3: Follow-up Socratic probe
+  const [followUpQuestion, setFollowUpQuestion] = useState<string | null>(null)
+  const [followUpLoading, setFollowUpLoading] = useState(false)
+  const [followUpAnswer, setFollowUpAnswer] = useState("")
+  const [followUpSkipped, setFollowUpSkipped] = useState(false)
+  const [followUpError, setFollowUpError] = useState<string | null>(null)
+  const followUpGenIdRef = useRef(0)
 
   useEffect(() => {
     try {
@@ -317,6 +417,7 @@ export default function App() {
   useEffect(() => {
     if (combinedResult && !hasSaved && milestones.length > 0) {
       const finalScore = Math.round(combinedResult.coverage_score * 0.6 + (combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score) * 0.4)
+      const fingerprint = computeFingerprint(milestones)
       const entry: HistoryEntry = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
@@ -324,8 +425,10 @@ export default function App() {
         coverageScore: combinedResult.coverage_score,
         clarityScore: combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score,
         finalScore,
-        transcript: transcript.slice(0, 500),
+        transcript: transcript,
         isGaming: combinedResult.is_gaming_attempt,
+        fingerprint,
+        details: combinedResult.details,
       }
       const next = [...historyEntries, entry]
       setHistoryEntries(next)
@@ -334,9 +437,39 @@ export default function App() {
     }
   }, [combinedResult, milestones, transcript, hasSaved, historyEntries])
 
+  // Phase 3.2: Socratic follow-up question — auto-fetch when results ready
+  useEffect(() => {
+    if (!combinedResult || !transcript || milestones.length === 0) return
+    const missed = combinedResult.details.find((d) => !d.covered)
+    if (!missed) {
+      setFollowUpQuestion(null)
+      setFollowUpLoading(false)
+      return
+    }
+    const genId = ++followUpGenIdRef.current
+    setFollowUpLoading(true)
+    setFollowUpQuestion(null)
+    setFollowUpError(null)
+    setFollowUpSkipped(false)
+    setFollowUpAnswer("")
+    generateFollowUpQuestion(missed.concept, transcript)
+      .then((q) => {
+        if (genId !== followUpGenIdRef.current) return
+        setFollowUpQuestion(q)
+        setFollowUpLoading(false)
+      })
+      .catch(() => {
+        if (genId !== followUpGenIdRef.current) return
+        setFollowUpError(null)
+        setFollowUpLoading(false)
+        // Fail silently — follow-up is optional
+      })
+  }, [combinedResult, transcript, milestones])
+
   const handleReset = () => {
     milestoneGenIdRef.current += 1
     evalGenIdRef.current += 1
+    followUpGenIdRef.current += 1
     evalInFlightRef.current = false
     setMilestones([])
     setTranscript("")
@@ -350,10 +483,16 @@ export default function App() {
     setDocumentStatus("idle")
     setDocumentError(null)
     setIsEditingTranscript(false)
+    setFollowUpQuestion(null)
+    setFollowUpLoading(false)
+    setFollowUpAnswer("")
+    setFollowUpSkipped(false)
+    setFollowUpError(null)
   }
 
   const handleBackToUpload = () => {
     evalGenIdRef.current += 1
+    followUpGenIdRef.current += 1
     evalInFlightRef.current = false
     setHasDocument(false)
     setIsEditingTranscript(false)
@@ -361,19 +500,31 @@ export default function App() {
     setCombinedResult(null)
     setIsEvaluating(false)
     setEvaluationError(null)
+    setFollowUpQuestion(null)
+    setFollowUpLoading(false)
+    setFollowUpAnswer("")
+    setFollowUpSkipped(false)
+    setFollowUpError(null)
   }
 
   const handleBackToTranscript = () => {
     evalGenIdRef.current += 1
+    followUpGenIdRef.current += 1
     evalInFlightRef.current = false
     setCombinedResult(null)
     setIsEvaluating(false)
     setEvaluationError(null)
     setIsEditingTranscript(true)
+    setFollowUpQuestion(null)
+    setFollowUpLoading(false)
+    setFollowUpAnswer("")
+    setFollowUpSkipped(false)
+    setFollowUpError(null)
   }
 
   const handleTranscriptReady = (newTranscript: string) => {
     evalGenIdRef.current += 1
+    followUpGenIdRef.current += 1
     evalInFlightRef.current = false
     setTranscript(newTranscript)
     setIsEditingTranscript(false)
@@ -381,13 +532,24 @@ export default function App() {
     setIsEvaluating(false)
     setEvaluationError(null)
     setHasSaved(false)
+    setFollowUpQuestion(null)
+    setFollowUpLoading(false)
+    setFollowUpAnswer("")
+    setFollowUpSkipped(false)
+    setFollowUpError(null)
   }
 
   const handleRetryEvaluation = () => {
     evalGenIdRef.current += 1
+    followUpGenIdRef.current += 1
     evalInFlightRef.current = false
     setEvaluationError(null)
     setCombinedResult(null)
+    setFollowUpQuestion(null)
+    setFollowUpLoading(false)
+    setFollowUpAnswer("")
+    setFollowUpSkipped(false)
+    setFollowUpError(null)
     if (transcript && milestones.length > 0) {
       // delay to allow state to settle before re-evaluating
       setTimeout(() => runCombinedEvaluation(transcript, milestones), 0)
@@ -408,11 +570,12 @@ export default function App() {
       <div className="max-w-3xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
         <header className="mb-10 text-center relative">
           <HeaderBar onNewSession={handleReset} onHistory={() => setHistoryOpen(true)} hasHistory={hasHistory} />
-          <h1 className="font-serif text-4xl sm:text-5xl font-bold text-parchment tracking-tight">
-            FeynmanBox
-          </h1>
+          <h1 className="font-serif text-4xl sm:text-5xl font-bold text-parchment tracking-tight">FeynmanBox</h1>
           <div className="mt-3 mx-auto w-16 h-0.5 bg-brass" />
-          <p className="mt-3 label-tag">Oral Examination System</p>
+          <p className="mt-3 font-serif text-sm text-parchment-muted italic leading-relaxed max-w-xl mx-auto">
+            It doesn't test what you remember. It tests if you can explain it.
+          </p>
+          <p className="mt-1 label-tag text-[10px]">Oral examination — bluff detection</p>
         </header>
 
         <main className="space-y-6">
@@ -444,7 +607,12 @@ export default function App() {
           )}
 
           {!hasDocument && (
-            <DocumentUpload onFileSelected={handleFileSelected} onPasteText={handlePasteText} error={documentError} status={documentStatus} />
+            <>
+              <p className="font-mono text-xs text-parchment-muted text-center leading-relaxed max-w-xl mx-auto -mt-2">
+                Catches the illusion of competence — when reciting keywords feels like understanding, but isn&apos;t.
+              </p>
+              <DocumentUpload onFileSelected={handleFileSelected} onPasteText={handlePasteText} error={documentError} status={documentStatus} />
+            </>
           )}
 
           {hasDocument && (!transcript || isEditingTranscript) && (
@@ -629,7 +797,88 @@ export default function App() {
                 </summary>
                 <p className="mt-2 font-mono text-xs text-parchment-muted whitespace-pre-wrap leading-relaxed">{transcript}</p>
               </details>
+
+              <details className="mt-4">
+                <summary className="font-mono text-xs text-parchment-muted cursor-pointer hover:text-parchment transition-colors tracking-wider">
+                  How this works
+                </summary>
+                <p className="mt-2 font-mono text-xs text-parchment-muted leading-relaxed">
+                  One structured AI call evaluates concept coverage, explanation clarity, and detects keyword-gaming simultaneously — reducing latency and API usage compared to running these as separate sequential calls.
+                </p>
+              </details>
             </div>
+          )}
+
+          {/* Phase 3.2: Socratic follow-up question */}
+          {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && combinedResult && !isEvaluating && !evaluationError && (
+            <>
+              {followUpLoading && (
+                <div className="panel p-6 animate-fade-in">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 bg-brass rounded-full animate-pulse" />
+                    <h3 className="label-tag text-[10px]">Examiner&apos;s Follow-Up</h3>
+                  </div>
+                  <p className="font-mono text-xs text-parchment-muted">Preparing a follow-up question…</p>
+                </div>
+              )}
+              {followUpQuestion && !followUpSkipped && !followUpLoading && (
+                <div className="panel p-6 animate-fade-in border-brass/30">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-2 h-2 bg-brass rounded-sm" />
+                    <h3 className="font-serif text-lg font-semibold text-parchment">Examiner&apos;s Follow-Up</h3>
+                  </div>
+                  <p className="label-tag text-[10px] mb-3">Socratic probe — reflection only, not re-graded</p>
+                  <p className="font-serif text-base text-parchment leading-relaxed border-l-2 border-brass pl-4 py-1 mb-4">{followUpQuestion}</p>
+                  <label htmlFor="followup-answer" className="label-tag text-[10px] mb-2 block">
+                    Your response (optional)
+                  </label>
+                  <textarea
+                    id="followup-answer"
+                    value={followUpAnswer}
+                    onChange={(e) => setFollowUpAnswer(e.target.value)}
+                    placeholder="Type a brief reflection…"
+                    rows={3}
+                    className="w-full bg-ink border border-ink-border rounded-panel p-3 font-mono text-sm text-parchment placeholder:text-parchment-muted focus:outline-none focus:border-brass transition-colors min-h-[80px]"
+                  />
+                  <div className="flex gap-3 mt-3">
+                    <button onClick={() => setFollowUpSkipped(true)} className="btn-ghost text-xs flex-1">
+                      Skip
+                    </button>
+                    <button onClick={() => setFollowUpSkipped(true)} className="btn-primary text-xs flex-1" disabled={!followUpAnswer.trim()}>
+                      Save reflection
+                    </button>
+                  </div>
+                </div>
+              )}
+              {followUpQuestion && followUpSkipped && followUpAnswer.trim() && (
+                <div className="panel p-6 animate-fade-in">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-2 h-2 bg-verified rounded-sm" />
+                    <h3 className="font-serif text-lg font-semibold text-parchment">Reflection Saved</h3>
+                  </div>
+                  <p className="font-serif text-sm text-parchment leading-relaxed border-l-2 border-verified pl-4 py-1 mb-3">{followUpQuestion}</p>
+                  <p className="font-mono text-xs text-parchment-muted mb-2">Your response:</p>
+                  <p className="font-mono text-sm text-parchment bg-ink border border-ink-border rounded-panel p-3 whitespace-pre-wrap">{followUpAnswer}</p>
+                  <p className="font-mono text-xs text-verified mt-3">Not re-graded — for your reflection only.</p>
+                  <button onClick={() => setFollowUpSkipped(false)} className="font-mono text-xs text-brass hover:text-brass-light mt-3">
+                    Edit response
+                  </button>
+                </div>
+              )}
+              {followUpError && !followUpLoading && !followUpQuestion && !followUpSkipped && (
+                <div className="panel p-4">
+                  <p className="font-mono text-xs text-parchment-muted">Follow-up question unavailable.</p>
+                </div>
+              )}
+              {followUpSkipped && !followUpAnswer.trim() && (
+                <div className="panel p-4">
+                  <p className="font-mono text-xs text-parchment-muted">Follow-up skipped.</p>
+                  <button onClick={() => setFollowUpSkipped(false)} className="font-mono text-xs text-brass hover:text-brass-light mt-2">
+                    Show question again
+                  </button>
+                </div>
+              )}
+            </>
           )}
 
           {isMastered && milestones.length > 0 && combinedResult && (
@@ -639,6 +888,18 @@ export default function App() {
               details={combinedResult.details}
               onReset={handleReset}
             />
+          )}
+
+          {/* Footer: how-it-works note also visible when no results yet, subtle */}
+          {!combinedResult && !isEvaluating && hasDocument && documentStatus === "ready" && (
+            <details className="panel p-4">
+              <summary className="font-mono text-xs text-parchment-muted cursor-pointer hover:text-parchment transition-colors tracking-wider">
+                How this works
+              </summary>
+              <p className="mt-2 font-mono text-xs text-parchment-muted leading-relaxed">
+                One structured AI call evaluates concept coverage, explanation clarity, and detects keyword-gaming simultaneously — reducing latency and API usage compared to running these as separate sequential calls. Document parsing, audio capture, and waveform visualization all run in the browser.
+              </p>
+            </details>
           )}
 
           {historyOpen && (
