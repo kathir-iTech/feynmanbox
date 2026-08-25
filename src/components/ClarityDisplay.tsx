@@ -28,7 +28,8 @@ function AnimatedScore({ value }: { value: number }) {
 export const ClarityDisplay: React.FC<{
   transcript: string
   onNext?: (result?: { score: number; isGaming: boolean; reasoning: string }) => void
-}> = ({ transcript, onNext }) => {
+  onBack?: () => void
+}> = ({ transcript, onNext, onBack }) => {
   const [state, setState] = useState<{
     clarityScore: number
     isGaming: boolean
@@ -105,6 +106,18 @@ export const ClarityDisplay: React.FC<{
         <div className="absolute top-0 left-0 right-0 h-0.5">
           <div className="h-full bg-brass animate-progress-bar" />
         </div>
+      )}
+
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 font-mono text-xs text-parchment-muted hover:text-parchment transition-colors mb-4 tracking-wider"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          Back to coverage
+        </button>
       )}
 
       <div className="flex items-center gap-3 mb-2">

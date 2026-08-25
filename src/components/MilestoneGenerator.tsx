@@ -74,7 +74,7 @@ export const MilestoneGenerator: React.FC<{
               : ""
           }`}
         >
-          {loading ? "Preparing your milestones..." : "Generate 3 Milestones"}
+          {loading ? "Preparing your milestones..." : "Generate Milestones"}
         </button>
       </div>
 

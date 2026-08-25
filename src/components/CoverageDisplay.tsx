@@ -1,20 +1,23 @@
 import { useState, useRef, useEffect } from "react"
 import { checkCoverage } from "../lib/coverageService"
-import type { Milestone } from "../types"
+import type { Milestone, CoverageDetail } from "../types"
 
 export const CoverageDisplay: React.FC<{
   milestones: Milestone[]
   transcript: string
-  onEvaluated: (result?: { covered: boolean[]; score: number }) => void
-}> = ({ milestones, transcript, onEvaluated }) => {
+  onEvaluated: (result?: { covered: boolean[]; score: number; details: CoverageDetail[] }) => void
+  onBack?: () => void
+}> = ({ milestones, transcript, onEvaluated, onBack }) => {
   const [state, setState] = useState<{
     covered: boolean[]
+    details: CoverageDetail[]
     coverageScore: number
     loading: boolean
     error: string | null
     evaluated: boolean
   }>({
     covered: milestones.map(() => false),
+    details: [],
     coverageScore: 0,
     loading: false,
     error: null,
@@ -29,6 +32,7 @@ export const CoverageDisplay: React.FC<{
     inFlightRef.current = false
     setState({
       covered: milestones.map(() => false),
+      details: [],
       coverageScore: 0,
       loading: false,
       error: null,
@@ -56,6 +60,7 @@ export const CoverageDisplay: React.FC<{
       const result = await checkCoverage(milestones, transcript, apiKey)
       setState({
         covered: result.milestones_covered,
+        details: result.details,
         coverageScore: result.coverage_score,
         loading: false,
         error: null,
@@ -66,6 +71,7 @@ export const CoverageDisplay: React.FC<{
       setState((prev) => ({
         ...prev,
         covered: milestones.map(() => false),
+        details: [],
         coverageScore: 0,
         loading: false,
         error: message,
@@ -84,6 +90,18 @@ export const CoverageDisplay: React.FC<{
         <div className="absolute top-0 left-0 right-0 h-0.5">
           <div className="h-full bg-brass animate-progress-bar" />
         </div>
+      )}
+
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 font-mono text-xs text-parchment-muted hover:text-parchment transition-colors mb-4 tracking-wider"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          Back to transcript
+        </button>
       )}
 
       <div className="flex items-center gap-3 mb-2">
@@ -131,53 +149,87 @@ export const CoverageDisplay: React.FC<{
               style={{ width: `${state.coverageScore}%` }}
             />
           </div>
+          <p className="font-mono text-xs text-parchment-muted mt-2">
+            {state.details.filter((d) => d.covered).length} of {state.details.length} concepts covered
+          </p>
 
-          <div className="mt-6">
-            <p className="label-tag text-[10px] mb-3">Case File</p>
-            <div className="space-y-2">
-              {milestones.map((milestone, index) => {
-                const verified = state.covered[index]
-                return (
-                  <div
-                    key={milestone.id}
-                    className={`flex items-start gap-3 p-3 rounded-panel border transition-all duration-500 ${
-                      verified
-                        ? "border-verified/30 bg-verified/5"
-                        : "border-ink-border bg-ink"
-                    }`}
-                    style={{ transitionDelay: `${index * 300}ms` }}
-                  >
-                    <div className={`mt-0.5 w-4 h-4 rounded-sm border-2 flex items-center justify-center flex-shrink-0 transition-all duration-500 ${
-                      verified
-                        ? "bg-brass border-brass"
-                        : "border-parchment-muted/30"
-                    }`}>
-                      {verified && (
-                        <svg className="w-2.5 h-2.5 text-ink" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M2 6l3 3 5-5" />
-                        </svg>
-                      )}
+          {/* What you understood well */}
+          {state.details.filter((d) => d.covered).length > 0 && (
+            <div className="mt-6">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 bg-verified rounded-sm" />
+                <p className="label-tag text-[10px]">What you understood well</p>
+                <span className="font-mono text-[10px] text-verified">
+                  {state.details.filter((d) => d.covered).length} • covered
+                </span>
+              </div>
+              <div className="space-y-3">
+                {state.details
+                  .filter((d) => d.covered)
+                  .map((detail, idx) => (
+                    <div
+                      key={`covered-${idx}`}
+                      className="p-3 rounded-panel border border-verified/30 bg-verified/5"
+                      style={{ transitionDelay: `${idx * 100}ms` }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 w-4 h-4 rounded-sm bg-verified border border-verified flex items-center justify-center flex-shrink-0">
+                          <svg className="w-2.5 h-2.5 text-ink" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M2 6l3 3 5-5" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-serif text-sm text-parchment leading-snug">{detail.concept}</p>
+                          <p className="font-mono text-xs text-verified/80 mt-1.5 leading-relaxed">{detail.feedback}</p>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-serif text-sm text-parchment leading-snug">
-                        {milestone.text}
-                      </p>
-                    </div>
-                    {verified && (
-                      <span className="font-mono text-[10px] text-verified tracking-wider flex-shrink-0 mt-0.5">
-                        Verified
-                      </span>
-                    )}
-                  </div>
-                )
-              })}
+                  ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* What you missed */}
+          {state.details.filter((d) => !d.covered).length > 0 && (
+            <div className="mt-6">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 bg-flagged rounded-sm" />
+                <p className="label-tag text-[10px]">What you missed or need to revisit</p>
+                <span className="font-mono text-[10px] text-flagged">
+                  {state.details.filter((d) => !d.covered).length} • to review
+                </span>
+              </div>
+              <div className="space-y-3">
+                {state.details
+                  .filter((d) => !d.covered)
+                  .map((detail, idx) => (
+                    <div
+                      key={`missed-${idx}`}
+                      className="p-3 rounded-panel border border-flagged/20 bg-flagged/5"
+                      style={{ transitionDelay: `${idx * 100}ms` }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 w-4 h-4 rounded-sm border-2 border-parchment-muted/30 flex items-center justify-center flex-shrink-0">
+                          <span className="font-mono text-[8px] text-parchment-muted">—</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-serif text-sm text-parchment leading-snug">{detail.concept}</p>
+                          <p className="font-mono text-xs text-parchment-muted mt-1.5 leading-relaxed">{detail.feedback}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {state.evaluated && !state.loading && (
-        <button onClick={() => onEvaluated({ covered: state.covered, score: state.coverageScore })} className="btn-primary w-full mt-6">
+        <button
+          onClick={() => onEvaluated({ covered: state.covered, score: state.coverageScore, details: state.details })}
+          className="btn-primary w-full mt-6"
+        >
           Proceed to Clarity Check
         </button>
       )}

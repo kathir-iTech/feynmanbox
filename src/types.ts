@@ -18,6 +18,19 @@ export interface CoverageState {
   loading: boolean
 }
 
+export interface CoverageDetail {
+  concept: string
+  covered: boolean
+  feedback: string
+}
+
+export interface CoverageResult {
+  details: CoverageDetail[]
+  coverage_score: number
+  // backward compat for simple boolean array
+  milestones_covered?: boolean[]
+}
+
 export interface TranscriptState {
   finalTranscript: string
   interimTranscript: string

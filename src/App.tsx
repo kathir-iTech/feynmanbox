@@ -115,7 +115,7 @@ export default function App() {
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const [transcript, setTranscript] = useState<string>("")
   const [showClarity, setShowClarity] = useState(false)
-  const [coverageData, setCoverageData] = useState<{ covered: boolean[]; score: number } | null>(null)
+  const [coverageData, setCoverageData] = useState<{ covered: boolean[]; score: number; details?: import("./types").CoverageDetail[] } | null>(null)
   const [clarityData, setClarityData] = useState<{ score: number; isGaming: boolean; reasoning: string } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
@@ -213,9 +213,9 @@ export default function App() {
     }, 50)
   }
 
-  const handleCoverageComplete = (result?: { covered: boolean[]; score: number }) => {
+  const handleCoverageComplete = (result?: { covered: boolean[]; score: number; details: import("./types").CoverageDetail[] }) => {
     if (result) {
-      setCoverageData({ covered: result.covered, score: result.score })
+      setCoverageData({ covered: result.covered, score: result.score, details: result.details })
     }
     setShowClarity(true)
   }
@@ -342,6 +342,10 @@ export default function App() {
               milestones={milestones}
               transcript={transcript}
               onEvaluated={handleCoverageComplete}
+              onBack={() => {
+                setTranscript("")
+                setCoverageData(null)
+              }}
             />
           )}
 
@@ -349,6 +353,7 @@ export default function App() {
             <ClarityDisplay
               transcript={transcript}
               onNext={handleClarityComplete}
+              onBack={() => setShowClarity(false)}
             />
           )}
 
