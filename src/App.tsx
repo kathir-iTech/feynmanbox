@@ -1,13 +1,12 @@
 import "./index.css"
 import { DocumentUpload } from "./components/DocumentUpload"
 import { VoiceRecorder } from "./components/VoiceRecorder"
-import { CoverageDisplay } from "./components/CoverageDisplay"
-import { ClarityDisplay } from "./components/ClarityDisplay"
 import { ExportFeature } from "./components/ExportFeature"
 import type { Milestone } from "./types"
 import { useState, useEffect } from "react"
 import { extractTextFromFile } from "./lib/fileExtractor"
 import { generateMilestones } from "./lib/milestoneService"
+import { evaluateCombined, type CombinedEvaluationResult } from "./lib/combinedEvaluationService"
 
 interface HistoryEntry {
   id: string
@@ -114,9 +113,9 @@ function HistoryPanel({ entries, onClose, onClear }: { entries: HistoryEntry[]; 
 export default function App() {
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const [transcript, setTranscript] = useState<string>("")
-  const [showClarity, setShowClarity] = useState(false)
-  const [coverageData, setCoverageData] = useState<{ covered: boolean[]; score: number; details?: import("./types").CoverageDetail[] } | null>(null)
-  const [clarityData, setClarityData] = useState<{ score: number; isGaming: boolean; reasoning: string } | null>(null)
+  const [combinedResult, setCombinedResult] = useState<CombinedEvaluationResult | null>(null)
+  const [isEvaluating, setIsEvaluating] = useState(false)
+  const [evaluationError, setEvaluationError] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
   const [hasSaved, setHasSaved] = useState(false)
@@ -215,52 +214,71 @@ export default function App() {
     }, 50)
   }
 
-  const handleCoverageComplete = (result?: { covered: boolean[]; score: number; details: import("./types").CoverageDetail[] }) => {
-    if (result) {
-      setCoverageData({ covered: result.covered, score: result.score, details: result.details })
-    }
-    setShowClarity(true)
-  }
-
-  const handleClarityComplete = (result?: { score: number; isGaming: boolean; reasoning: string }) => {
-    if (result) {
-      setClarityData({ score: result.score, isGaming: result.isGaming, reasoning: result.reasoning })
-    } else {
-      // fallback: hide clarity panel without result
-      setShowClarity(false)
+  const runCombinedEvaluation = async (currentTranscript: string, currentMilestones: Milestone[]) => {
+    if (!currentTranscript.trim() || currentMilestones.length === 0) return
+    if (!apiKey) {
+      setEvaluationError("Analysis is temporarily unavailable. Please try again later.")
       return
     }
-    setShowClarity(false)
-    // keep clarity panel hidden after evaluation; mastery result will show inline
+    setIsEvaluating(true)
+    setEvaluationError(null)
+    setCombinedResult(null)
+    try {
+      const result = await evaluateCombined(currentMilestones, currentTranscript, apiKey)
+      setCombinedResult(result)
+      setEvaluationError(null)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "We couldn't complete the analysis. Please try again."
+      setEvaluationError(msg)
+      setCombinedResult(null)
+    } finally {
+      setIsEvaluating(false)
+    }
   }
 
-  // Save to history when both evaluations are present and not yet saved
+  // FIX 3: Auto-run combined evaluation when transcript + milestones ready (single click flow)
   useEffect(() => {
-    if (coverageData && clarityData && !hasSaved && milestones.length > 0) {
-      const finalScore = Math.round(coverageData.score * 0.6 + (clarityData.isGaming ? 0 : clarityData.score) * 0.4)
+    if (
+      hasDocument &&
+      transcript &&
+      !isEditingTranscript &&
+      milestones.length > 0 &&
+      documentStatus === "ready" &&
+      !combinedResult &&
+      !isEvaluating &&
+      !evaluationError
+    ) {
+      runCombinedEvaluation(transcript, milestones)
+    }
+  }, [hasDocument, transcript, milestones, isEditingTranscript, documentStatus, combinedResult, isEvaluating, evaluationError])
+
+  // Save to history when combined result present and not yet saved
+  useEffect(() => {
+    if (combinedResult && !hasSaved && milestones.length > 0) {
+      const finalScore = Math.round(combinedResult.coverage_score * 0.6 + (combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score) * 0.4)
       const entry: HistoryEntry = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
         milestones,
-        coverageScore: coverageData.score,
-        clarityScore: clarityData.isGaming ? 0 : clarityData.score,
+        coverageScore: combinedResult.coverage_score,
+        clarityScore: combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score,
         finalScore,
         transcript: transcript.slice(0, 500),
-        isGaming: clarityData.isGaming,
+        isGaming: combinedResult.is_gaming_attempt,
       }
       const next = [...historyEntries, entry]
       setHistoryEntries(next)
       persistHistory(next)
       setHasSaved(true)
     }
-  }, [coverageData, clarityData, milestones, transcript, hasSaved, historyEntries])
+  }, [combinedResult, milestones, transcript, hasSaved, historyEntries])
 
   const handleReset = () => {
     setMilestones([])
     setTranscript("")
-    setShowClarity(false)
-    setCoverageData(null)
-    setClarityData(null)
+    setCombinedResult(null)
+    setIsEvaluating(false)
+    setEvaluationError(null)
     setHasSaved(false)
     setHistoryOpen(false)
     setHasDocument(false)
@@ -275,28 +293,34 @@ export default function App() {
     setHasDocument(false)
     setIsEditingTranscript(false)
     setTranscript("")
-    setCoverageData(null)
-    setClarityData(null)
-    setShowClarity(false)
+    setCombinedResult(null)
+    setIsEvaluating(false)
+    setEvaluationError(null)
   }
 
   const handleBackToTranscript = () => {
-    setCoverageData(null)
-    setShowClarity(false)
+    setCombinedResult(null)
+    setIsEvaluating(false)
+    setEvaluationError(null)
     setIsEditingTranscript(true)
-  }
-
-  const handleBackToCoverage = () => {
-    setShowClarity(false)
-    setClarityData(null)
   }
 
   const handleTranscriptReady = (newTranscript: string) => {
     setTranscript(newTranscript)
     setIsEditingTranscript(false)
-    setCoverageData(null)
-    setClarityData(null)
-    setShowClarity(false)
+    setCombinedResult(null)
+    setIsEvaluating(false)
+    setEvaluationError(null)
+    setHasSaved(false)
+    // FIX 3: evaluation will auto-run via useEffect when milestones ready
+  }
+
+  const handleRetryEvaluation = () => {
+    setEvaluationError(null)
+    setCombinedResult(null)
+    if (transcript && milestones.length > 0) {
+      runCombinedEvaluation(transcript, milestones)
+    }
   }
 
   const handleClearHistory = () => {
@@ -304,9 +328,8 @@ export default function App() {
     persistHistory([])
   }
 
-  const finalScore =
-    coverageData && clarityData ? Math.round(coverageData.score * 0.6 + (clarityData.isGaming ? 0 : clarityData.score) * 0.4) : 0
-  const isMastered = coverageData !== null && clarityData !== null && finalScore >= 80 && !clarityData.isGaming
+  const finalScore = combinedResult ? Math.round(combinedResult.coverage_score * 0.6 + (combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score) * 0.4) : 0
+  const isMastered = combinedResult !== null && finalScore >= 80 && !combinedResult.is_gaming_attempt
   const hasHistory = historyEntries.length > 0
 
   return (
@@ -368,65 +391,168 @@ export default function App() {
             </div>
           )}
 
-          {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && !showClarity && !clarityData && (
-            <CoverageDisplay
-              milestones={milestones}
-              transcript={transcript}
-              onEvaluated={handleCoverageComplete}
-              onBack={handleBackToTranscript}
-            />
+          {/* FIX 3: Single combined evaluation — auto runs after Confirm & Evaluate, one loading state */}
+          {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && isEvaluating && (
+            <div className="panel p-6 text-center relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-0.5">
+                <div className="h-full bg-brass animate-progress-bar" />
+              </div>
+              <div className="w-2 h-2 bg-brass rounded-full animate-pulse mx-auto mb-3" />
+              <p className="label-tag">Analyzing your explanation...</p>
+              <p className="font-mono text-xs text-parchment-muted mt-2">Checking coverage and clarity in one step.</p>
+              <div className="mt-4 h-0.5 bg-ink-border rounded-sm overflow-hidden">
+                <div className="h-full bg-brass animate-progress-bar" />
+              </div>
+            </div>
           )}
 
-          {showClarity && hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && (
-            <ClarityDisplay
-              transcript={transcript}
-              onNext={handleClarityComplete}
-              onBack={handleBackToCoverage}
-            />
+          {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && evaluationError && !isEvaluating && (
+            <div className="panel p-6">
+              <div className="p-4 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
+                {evaluationError}
+              </div>
+              <div className="flex gap-3 mt-4">
+                <button onClick={handleRetryEvaluation} className="btn-primary flex-1">
+                  Try Again
+                </button>
+                <button onClick={handleBackToTranscript} className="btn-ghost">
+                  Edit Transcript
+                </button>
+              </div>
+            </div>
           )}
 
-          {coverageData && clarityData && (
-            <div className="panel p-6 animate-fade-in">
-              <div className="flex items-center gap-3 mb-4">
-                <div className={`w-2 h-2 rounded-sm ${isMastered ? "bg-verified" : clarityData.isGaming ? "bg-flagged" : "bg-brass"}`} />
+          {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && combinedResult && !isEvaluating && (
+            <div className="panel p-6 animate-fade-in relative overflow-hidden">
+              <button
+                onClick={handleBackToTranscript}
+                className="flex items-center gap-1.5 font-mono text-xs text-parchment-muted hover:text-parchment transition-colors mb-4 tracking-wider"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+                Back to transcript
+              </button>
+
+              <div className="flex items-center gap-3 mb-2">
+                <div className={`w-2 h-2 rounded-sm ${isMastered ? "bg-verified" : combinedResult.is_gaming_attempt ? "bg-flagged" : "bg-brass"}`} />
                 <h2 className="font-serif text-xl font-semibold text-parchment">
-                  {clarityData.isGaming ? "Review Needed" : isMastered ? "Mastery Achieved" : "Assessment Complete"}
+                  {combinedResult.is_gaming_attempt ? "Review Needed" : isMastered ? "Mastery Achieved" : "Assessment Complete"}
                 </h2>
               </div>
+              <p className="label-tag mb-4">Combined Evaluation</p>
 
-              {clarityData.isGaming ? (
-                <div className="p-4 rounded-panel border border-flagged/60 bg-flagged/10">
+              {/* Overall score */}
+              <div className="flex items-baseline gap-3 mb-2">
+                <span className="label-tag">Final Score</span>
+                <span className="score-display">{finalScore}</span>
+                <span className="label-tag">/100</span>
+              </div>
+              <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-2">
+                <div
+                  className={`h-full transition-all duration-1000 ease-out ${isMastered ? "bg-verified" : combinedResult.is_gaming_attempt ? "bg-flagged" : "bg-brass"}`}
+                  style={{ width: `${finalScore}%` }}
+                />
+              </div>
+              <p className="font-mono text-xs text-parchment-muted mb-4">
+                Coverage {combinedResult.coverage_score}% × 0.6 + Clarity {combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score}% × 0.4
+              </p>
+
+              {/* FIX 4: Brief overall summary */}
+              <div className="p-4 rounded-panel border border-brass/20 bg-brass/5 mb-6">
+                <p className="label-tag text-[10px] mb-1">Summary</p>
+                <p className="font-serif text-sm text-parchment leading-relaxed">{combinedResult.summary}</p>
+              </div>
+
+              {/* Flagged warning inline */}
+              {combinedResult.is_gaming_attempt && (
+                <div className="p-4 rounded-panel border border-flagged/60 bg-flagged/10 mb-6 animate-shake">
                   <p className="font-mono text-sm font-bold text-flagged tracking-wide">Explanation flagged for review</p>
-                  <p className="font-mono text-xs text-flagged/80 mt-2 leading-relaxed">{clarityData.reasoning}</p>
+                  <p className="font-mono text-xs text-flagged/80 mt-2 leading-relaxed">{combinedResult.reasoning}</p>
                   <p className="font-mono text-xs text-parchment-muted mt-3">Clarity was set to 0. Focus on connecting ideas with words like “because,” “therefore,” and “this means” to show how concepts relate.</p>
                 </div>
-              ) : (
-                <>
-                  <div className="flex items-baseline gap-3 mb-2">
-                    <span className="label-tag">Final Score</span>
-                    <span className="score-display">{finalScore}</span>
-                    <span className="label-tag">/100</span>
+              )}
+
+              {/* What you understood well */}
+              {combinedResult.details.filter((d) => d.covered).length > 0 && (
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2 h-2 bg-verified rounded-sm" />
+                    <p className="label-tag text-[10px]">What you understood well</p>
+                    <span className="font-mono text-[10px] text-verified">{combinedResult.details.filter((d) => d.covered).length} • covered</span>
                   </div>
-                  <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-2">
-                    <div
-                      className={`h-full transition-all duration-1000 ease-out ${isMastered ? "bg-verified" : "bg-brass"}`}
-                      style={{ width: `${finalScore}%` }}
-                    />
+                  <div className="space-y-3">
+                    {combinedResult.details
+                      .filter((d) => d.covered)
+                      .map((detail, idx) => (
+                        <div key={`covered-${idx}`} className="p-3 rounded-panel border border-verified/30 bg-verified/5">
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 w-4 h-4 rounded-sm bg-verified border border-verified flex items-center justify-center flex-shrink-0">
+                              <svg className="w-2.5 h-2.5 text-ink" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M2 6l3 3 5-5" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-serif text-sm text-parchment leading-snug">{detail.concept}</p>
+                              <p className="font-mono text-xs text-verified/80 mt-1.5 leading-relaxed">{detail.feedback}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                   </div>
-                  <p className="font-mono text-xs text-parchment-muted mb-4">
-                    Coverage {coverageData.score}% × 0.6 + Clarity {clarityData.isGaming ? 0 : clarityData.score}% × 0.4
-                  </p>
-                  {!isMastered && (
-                    <p className="font-mono text-xs text-parchment-muted leading-relaxed">
-                      Keep refining your explanation. Try to link each milestone with clear cause-and-effect language so your reasoning is easy to follow.
-                    </p>
-                  )}
-                  {isMastered && (
-                    <p className="font-mono text-xs text-verified leading-relaxed">
-                      Your explanation demonstrates strong coverage and clear reasoning.
-                    </p>
-                  )}
-                </>
+                </div>
+              )}
+
+              {/* What you missed */}
+              {combinedResult.details.filter((d) => !d.covered).length > 0 && (
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2 h-2 bg-flagged rounded-sm" />
+                    <p className="label-tag text-[10px]">What you missed or need to revisit</p>
+                    <span className="font-mono text-[10px] text-flagged">{combinedResult.details.filter((d) => !d.covered).length} • to review</span>
+                  </div>
+                  <div className="space-y-3">
+                    {combinedResult.details
+                      .filter((d) => !d.covered)
+                      .map((detail, idx) => (
+                        <div key={`missed-${idx}`} className="p-3 rounded-panel border border-flagged/20 bg-flagged/5">
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 w-4 h-4 rounded-sm border-2 border-parchment-muted/30 flex items-center justify-center flex-shrink-0">
+                              <span className="font-mono text-[8px] text-parchment-muted">—</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-serif text-sm text-parchment leading-snug">{detail.concept}</p>
+                              <p className="font-mono text-xs text-parchment-muted mt-1.5 leading-relaxed">{detail.feedback}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Clarity feedback when not flagged */}
+              {!combinedResult.is_gaming_attempt && combinedResult.reasoning && (
+                <div className="p-4 rounded-panel border border-ink-border bg-ink mb-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 bg-brass rounded-sm" />
+                    <p className="label-tag text-[10px]">Clarity & Coherence</p>
+                    <span className="font-mono text-xs text-parchment ml-auto">{combinedResult.clarity_score}/100</span>
+                  </div>
+                  <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-3">
+                    <div className="h-full bg-brass transition-all duration-1000 ease-out" style={{ width: `${combinedResult.clarity_score}%` }} />
+                  </div>
+                  <p className="font-mono text-xs text-parchment-muted leading-relaxed">{combinedResult.reasoning}</p>
+                </div>
+              )}
+
+              {!isMastered && !combinedResult.is_gaming_attempt && (
+                <p className="font-mono text-xs text-parchment-muted leading-relaxed">
+                  Keep refining your explanation. Try to link each milestone with clear cause-and-effect language so your reasoning is easy to follow.
+                </p>
+              )}
+              {isMastered && (
+                <p className="font-mono text-xs text-verified leading-relaxed">Your explanation demonstrates strong coverage and clear reasoning.</p>
               )}
 
               <details className="mt-5">

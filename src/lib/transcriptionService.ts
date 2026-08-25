@@ -16,7 +16,7 @@ export async function transcribeAudio(
             },
           },
           {
-            text: "Transcribe this audio exactly as spoken. Return only the transcript text with no additional commentary, labels, or formatting.",
+            text: "Transcribe this spoken audio word-for-word as accurately as possible. If any word is unclear, transcribe your best guess rather than omitting it. Do not add punctuation or formatting beyond what's spoken. Return only the transcript text.",
           },
         ],
       },

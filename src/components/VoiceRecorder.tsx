@@ -13,6 +13,9 @@ export const VoiceRecorder: React.FC<{
   const [hasRecording, setHasRecording] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recordingTime, setRecordingTime] = useState(0)
+  // FIX 1: live preview captions (visual only, discarded after)
+  const [livePreview, setLivePreview] = useState("")
+  const [liveInterim, setLiveInterim] = useState("")
 
   const streamRef = useRef<MediaStream | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -24,6 +27,9 @@ export const VoiceRecorder: React.FC<{
   const mainPathRef = useRef<SVGPathElement>(null)
   const shadowPathRef = useRef<SVGPathElement>(null)
   const [useFallbackWaveform, setUseFallbackWaveform] = useState(false)
+  // FIX 1: Web Speech refs
+  const liveRecognitionRef = useRef<any>(null)
+  const liveFinalRef = useRef<string>("")
 
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
@@ -44,6 +50,13 @@ export const VoiceRecorder: React.FC<{
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop())
       if (audioContextRef.current && audioContextRef.current.state !== "closed") {
         audioContextRef.current.close().catch(() => {})
+      }
+      // FIX 1: cleanup live caption recognition
+      if (liveRecognitionRef.current) {
+        try {
+          liveRecognitionRef.current.stop()
+        } catch {}
+        liveRecognitionRef.current = null
       }
     }
   }, [])
@@ -115,6 +128,9 @@ export const VoiceRecorder: React.FC<{
     setHasRecording(false)
     setRecordingTime(0)
     setUseFallbackWaveform(false)
+    setLivePreview("")
+    setLiveInterim("")
+    liveFinalRef.current = ""
     chunksRef.current = []
 
     try {
@@ -139,7 +155,7 @@ export const VoiceRecorder: React.FC<{
         setUseFallbackWaveform(true)
       }
 
-      // Setup MediaRecorder
+      // Setup MediaRecorder — FIX 2: high bitrate for better accuracy
       let mimeType = "audio/webm"
       if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
         mimeType = "audio/webm;codecs=opus"
@@ -149,7 +165,7 @@ export const VoiceRecorder: React.FC<{
         mimeType = "audio/mp4"
       }
 
-      const recorder = new MediaRecorder(stream, { mimeType })
+      const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 } as MediaRecorderOptions)
       mediaRecorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {
@@ -178,6 +194,16 @@ export const VoiceRecorder: React.FC<{
         }
         setIsRecording(false)
         setUseFallbackWaveform(false)
+        // FIX 1: stop and discard live preview (visual only)
+        if (liveRecognitionRef.current) {
+          try {
+            liveRecognitionRef.current.stop()
+          } catch {}
+          liveRecognitionRef.current = null
+        }
+        setLivePreview("")
+        setLiveInterim("")
+        liveFinalRef.current = ""
         const flat = "M 0 20 L 400 20"
         if (mainPathRef.current) mainPathRef.current.setAttribute("d", flat)
         if (shadowPathRef.current) shadowPathRef.current.setAttribute("d", flat)
@@ -187,7 +213,7 @@ export const VoiceRecorder: React.FC<{
           return
         }
 
-        // Transcribe via Gemini
+        // Transcribe via Gemini — FIX 2: correct MIME, higher accuracy
         if (!apiKey) {
           setError("Transcription is temporarily unavailable. Please try again later.")
           return
@@ -195,9 +221,8 @@ export const VoiceRecorder: React.FC<{
         setIsTranscribing(true)
         try {
           const base64 = await blobToBase64(blob)
-          // Determine mime for API
-          let apiMime = "audio/webm"
-          if (mimeType.includes("mp4")) apiMime = "audio/mp4"
+          // FIX 2: ensure MIME matches actual MediaRecorder output (base type)
+          const apiMime = mimeType.split(";")[0].trim() || "audio/webm"
           const transcript = await transcribeAudio(base64, apiMime, apiKey)
           setEditableTranscript(transcript)
           setHasRecording(true)
@@ -216,6 +241,45 @@ export const VoiceRecorder: React.FC<{
       timerRef.current = window.setInterval(() => {
         setRecordingTime((prev) => prev + 1)
       }, 1000)
+
+      // FIX 1: Start lightweight live captions (Web Speech, visual only, parallel — discarded after)
+      try {
+        const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        if (SpeechRecognition) {
+          liveFinalRef.current = ""
+          setLivePreview("")
+          setLiveInterim("")
+          const rec = new SpeechRecognition()
+          rec.continuous = true
+          rec.interimResults = true
+          rec.lang = "en-US"
+          rec.onresult = (event: any) => {
+            let interim = ""
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const t: string = event.results[i][0].transcript
+              if (event.results[i].isFinal) {
+                liveFinalRef.current += (liveFinalRef.current ? " " : "") + t
+              } else {
+                interim += t
+              }
+            }
+            setLivePreview(liveFinalRef.current)
+            setLiveInterim(interim)
+          }
+          rec.onerror = () => {}
+          rec.onend = () => {
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+              try {
+                rec.start()
+              } catch {}
+            }
+          }
+          liveRecognitionRef.current = rec
+          try {
+            rec.start()
+          } catch {}
+        }
+      } catch {}
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Microphone access denied."
       if ((err as any)?.name === "NotAllowedError") {
@@ -231,6 +295,12 @@ export const VoiceRecorder: React.FC<{
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop()
     }
+    // FIX 1: also stop live preview immediately on user stop
+    if (liveRecognitionRef.current) {
+      try {
+        liveRecognitionRef.current.stop()
+      } catch {}
+    }
     if (timerRef.current) {
       window.clearInterval(timerRef.current)
       timerRef.current = null
@@ -244,6 +314,15 @@ export const VoiceRecorder: React.FC<{
     setRecordingTime(0)
     setIsTranscribing(false)
     setIsRecording(false)
+    setLivePreview("")
+    setLiveInterim("")
+    liveFinalRef.current = ""
+    if (liveRecognitionRef.current) {
+      try {
+        liveRecognitionRef.current.stop()
+      } catch {}
+      liveRecognitionRef.current = null
+    }
     chunksRef.current = []
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current)
@@ -343,6 +422,19 @@ export const VoiceRecorder: React.FC<{
                 </>
               )}
             </svg>
+          </div>
+          {/* FIX 1: Live preview captions — visual only, discarded after */}
+          <div className="mt-3 p-3 rounded-panel bg-ink border border-ink-border min-h-[52px] max-h-[96px] overflow-y-auto">
+            <p className="label-tag text-[10px] mb-1">Live preview — approximate</p>
+            {livePreview || liveInterim ? (
+              <p className="font-mono text-xs text-parchment/60 leading-relaxed whitespace-pre-wrap">
+                {livePreview}
+                {livePreview && liveInterim ? " " : ""}
+                <span className="italic text-parchment/40">{liveInterim}</span>
+              </p>
+            ) : (
+              <p className="font-mono text-xs text-parchment-muted/40 italic">Listening… approximate captions will appear here.</p>
+            )}
           </div>
           <p className="font-mono text-[10px] text-parchment-muted mt-2 text-center">Speak clearly — your audio is being captured continuously.</p>
 
