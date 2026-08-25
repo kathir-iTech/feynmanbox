@@ -40,7 +40,7 @@ History is stored in `localStorage`. Re-attempting the same material is fingerpr
 
 **Client-side pipeline.** Document parsing (`pdfjs-dist` for PDF, `mammoth` for DOCX), audio capture (`MediaRecorder`), and waveform visualization (Web Audio API `AnalyserNode`) all run entirely in the browser — no server infrastructure beyond a minimal API-key-holding proxy function.
 
-**Server-side API key proxy.** The Gemini API key is never bundled to client JS. A Vercel serverless function at `/api/gemini.ts` reads `GEMINI_API_KEY` from a server-only env var (no `VITE_` prefix) and forwards the request to `generativelanguage.googleapis.com`. Client code calls `/api/gemini` with `{ model, payload }`. See `api/gemini.ts`, `src/lib/milestoneService.ts`, `src/lib/combinedEvaluationService.ts`, `src/lib/transcriptionService.ts:8`.
+**Server-side API key proxy.** The Gemini API key is never bundled to client JS. A Vercel serverless function at `/api/gemini.ts` reads `GEMINI_API_KEY` from a server-only env var (no `VITE_` prefix) and forwards the request to `generativelanguage.googleapis.com`. Client code calls `/api/gemini` with `{ model, payload }`. See `api/gemini.ts`, `src/lib/milestoneService.ts`, `src/lib/combinedEvaluationService.ts`, `src/lib/transcriptionService.ts`.
 
 ## Getting Started
 
