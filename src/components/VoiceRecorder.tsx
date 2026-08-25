@@ -3,7 +3,9 @@ import { transcribeAudio, blobToBase64 } from "../lib/transcriptionService"
 
 export const VoiceRecorder: React.FC<{
   onTranscriptReady: (transcript: string) => void
-}> = ({ onTranscriptReady }) => {
+  initialTranscript?: string
+  onBack?: () => void
+}> = ({ onTranscriptReady, initialTranscript, onBack }) => {
   const [isSupported, setIsSupported] = useState<boolean>(true)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
@@ -24,6 +26,14 @@ export const VoiceRecorder: React.FC<{
   const [useFallbackWaveform, setUseFallbackWaveform] = useState(false)
 
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
+
+  // If editing an existing transcript, show it immediately
+  useEffect(() => {
+    if (initialTranscript && initialTranscript.trim()) {
+      setEditableTranscript(initialTranscript)
+      setHasRecording(true)
+    }
+  }, [initialTranscript])
 
   useEffect(() => {
     const supported = !!navigator.mediaDevices?.getUserMedia && typeof window.MediaRecorder !== "undefined"
@@ -257,6 +267,17 @@ export const VoiceRecorder: React.FC<{
 
   return (
     <div className="panel p-6">
+      {onBack && !isRecording && !isTranscribing && (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 font-mono text-xs text-parchment-muted hover:text-parchment transition-colors mb-4 tracking-wider"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          Back to notes
+        </button>
+      )}
       {!isSupported && (
         <div className="p-4 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
           Audio recording isn't supported in this browser. Please try Chrome or Edge for the best experience.

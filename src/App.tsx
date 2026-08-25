@@ -127,6 +127,8 @@ export default function App() {
   const [fileName, setFileName] = useState<string | null>(null)
   const [documentStatus, setDocumentStatus] = useState<"idle" | "extracting" | "generating" | "ready" | "error">("idle")
   const [documentError, setDocumentError] = useState<string | null>(null)
+  // Block 6: Back navigation — preserve data when going back
+  const [isEditingTranscript, setIsEditingTranscript] = useState(false)
   // suppress unused var until Block 4 needs it visibly
   void notesText
 
@@ -266,6 +268,35 @@ export default function App() {
     setFileName(null)
     setDocumentStatus("idle")
     setDocumentError(null)
+    setIsEditingTranscript(false)
+  }
+
+  const handleBackToUpload = () => {
+    setHasDocument(false)
+    setIsEditingTranscript(false)
+    setTranscript("")
+    setCoverageData(null)
+    setClarityData(null)
+    setShowClarity(false)
+  }
+
+  const handleBackToTranscript = () => {
+    setCoverageData(null)
+    setShowClarity(false)
+    setIsEditingTranscript(true)
+  }
+
+  const handleBackToCoverage = () => {
+    setShowClarity(false)
+    setClarityData(null)
+  }
+
+  const handleTranscriptReady = (newTranscript: string) => {
+    setTranscript(newTranscript)
+    setIsEditingTranscript(false)
+    setCoverageData(null)
+    setClarityData(null)
+    setShowClarity(false)
   }
 
   const handleClearHistory = () => {
@@ -322,11 +353,11 @@ export default function App() {
             <DocumentUpload onFileSelected={handleFileSelected} onPasteText={handlePasteText} error={documentError} status={documentStatus} />
           )}
 
-          {hasDocument && !transcript && (
-            <VoiceRecorder onTranscriptReady={setTranscript} />
+          {hasDocument && (!transcript || isEditingTranscript) && (
+            <VoiceRecorder onTranscriptReady={handleTranscriptReady} initialTranscript={isEditingTranscript ? transcript : undefined} onBack={handleBackToUpload} />
           )}
 
-          {hasDocument && transcript && milestones.length === 0 && documentStatus !== "ready" && documentStatus !== "error" && (
+          {hasDocument && transcript && !isEditingTranscript && milestones.length === 0 && documentStatus !== "ready" && documentStatus !== "error" && (
             <div className="panel p-6 text-center">
               <div className="w-2 h-2 bg-brass rounded-full animate-pulse mx-auto mb-3" />
               <p className="label-tag">Analyzing your notes...</p>
@@ -337,23 +368,20 @@ export default function App() {
             </div>
           )}
 
-          {hasDocument && transcript && milestones.length > 0 && !showClarity && !clarityData && (
+          {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && !showClarity && !clarityData && (
             <CoverageDisplay
               milestones={milestones}
               transcript={transcript}
               onEvaluated={handleCoverageComplete}
-              onBack={() => {
-                setTranscript("")
-                setCoverageData(null)
-              }}
+              onBack={handleBackToTranscript}
             />
           )}
 
-          {showClarity && hasDocument && transcript && milestones.length > 0 && (
+          {showClarity && hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && (
             <ClarityDisplay
               transcript={transcript}
               onNext={handleClarityComplete}
-              onBack={() => setShowClarity(false)}
+              onBack={handleBackToCoverage}
             />
           )}
 
