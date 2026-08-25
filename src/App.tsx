@@ -1,11 +1,13 @@
 import "./index.css"
-import { MilestoneGenerator } from "./components/MilestoneGenerator"
+import { DocumentUpload } from "./components/DocumentUpload"
 import { VoiceRecorder } from "./components/VoiceRecorder"
 import { CoverageDisplay } from "./components/CoverageDisplay"
 import { ClarityDisplay } from "./components/ClarityDisplay"
 import { ExportFeature } from "./components/ExportFeature"
 import type { Milestone } from "./types"
 import { useState, useEffect } from "react"
+import { extractTextFromFile } from "./lib/fileExtractor"
+import { generateMilestones } from "./lib/milestoneService"
 
 interface HistoryEntry {
   id: string
@@ -119,6 +121,17 @@ export default function App() {
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
   const [hasSaved, setHasSaved] = useState(false)
 
+  // Block 1: Document upload + background processing
+  const [hasDocument, setHasDocument] = useState(false)
+  const [notesText, setNotesText] = useState<string>("")
+  const [fileName, setFileName] = useState<string | null>(null)
+  const [documentStatus, setDocumentStatus] = useState<"idle" | "extracting" | "generating" | "ready" | "error">("idle")
+  const [documentError, setDocumentError] = useState<string | null>(null)
+  // suppress unused var until Block 4 needs it visibly
+  void notesText
+
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem("feynmanbox_history")
@@ -137,6 +150,67 @@ export default function App() {
     } catch {
       // ignore
     }
+  }
+
+  const processNotesToMilestones = async (text: string) => {
+    if (!text.trim()) {
+      setDocumentStatus("error")
+      setDocumentError("No readable text found. Please try another file or paste your notes.")
+      return
+    }
+    setNotesText(text)
+    if (!apiKey) {
+      setDocumentStatus("error")
+      setDocumentError("Preparation is temporarily unavailable. Please try again later.")
+      return
+    }
+    setDocumentStatus("generating")
+    try {
+      const result = await generateMilestones(text, apiKey)
+      if (result.success) {
+        setMilestones(result.milestones)
+        setDocumentStatus("ready")
+        setDocumentError(null)
+      } else {
+        setDocumentStatus("error")
+        setDocumentError(result.error || "We couldn't prepare your milestones. Please try again.")
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "We couldn't complete the request. Please try again."
+      setDocumentStatus("error")
+      setDocumentError(msg)
+    }
+  }
+
+  const handleFileSelected = (file: File) => {
+    // Immediate transition — don't block UI
+    setHasDocument(true)
+    setFileName(file.name)
+    setDocumentStatus("extracting")
+    setDocumentError(null)
+    setMilestones([])
+    // Background extraction
+    extractTextFromFile(file)
+      .then((text) => {
+        return processNotesToMilestones(text)
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : "We couldn't read that file. Please try another file or paste your notes."
+        setDocumentStatus("error")
+        setDocumentError(msg)
+      })
+  }
+
+  const handlePasteText = (text: string) => {
+    setHasDocument(true)
+    setFileName("Pasted notes")
+    setDocumentStatus("extracting")
+    setDocumentError(null)
+    setMilestones([])
+    // microtask to allow UI transition before heavy processing
+    setTimeout(() => {
+      processNotesToMilestones(text)
+    }, 50)
   }
 
   const handleCoverageComplete = (result?: { covered: boolean[]; score: number }) => {
@@ -187,6 +261,11 @@ export default function App() {
     setClarityData(null)
     setHasSaved(false)
     setHistoryOpen(false)
+    setHasDocument(false)
+    setNotesText("")
+    setFileName(null)
+    setDocumentStatus("idle")
+    setDocumentError(null)
   }
 
   const handleClearHistory = () => {
@@ -212,15 +291,53 @@ export default function App() {
         </header>
 
         <main className="space-y-6">
-          {milestones.length === 0 && (
-            <MilestoneGenerator onMilestonesGenerated={setMilestones} />
+          {/* Unobtrusive document processing status — visible once file received */}
+          {hasDocument && documentStatus !== "idle" && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-panel border border-ink-border bg-ink-light animate-fade-in">
+              {documentStatus === "ready" ? (
+                <div className="w-2 h-2 bg-verified rounded-sm" />
+              ) : documentStatus === "error" ? (
+                <div className="w-2 h-2 bg-flagged rounded-sm" />
+              ) : (
+                <div className="w-2 h-2 bg-brass rounded-full animate-pulse" />
+              )}
+              <span className="font-mono text-xs text-parchment-muted truncate">
+                {documentStatus === "extracting"
+                  ? `Processing ${fileName ? `"${fileName}"` : "your notes"}...`
+                  : documentStatus === "generating"
+                    ? "Generating key concepts..."
+                    : documentStatus === "ready"
+                      ? `Notes ready${fileName ? ` — ${fileName}` : ""}`
+                      : documentError || "Error processing notes"}
+              </span>
+              {documentStatus === "error" && (
+                <button onClick={handleReset} className="ml-auto font-mono text-xs text-brass hover:text-brass-light flex-shrink-0">
+                  Try again
+                </button>
+              )}
+            </div>
           )}
 
-          {milestones.length > 0 && !transcript && (
+          {!hasDocument && (
+            <DocumentUpload onFileSelected={handleFileSelected} onPasteText={handlePasteText} error={documentError} status={documentStatus} />
+          )}
+
+          {hasDocument && !transcript && (
             <VoiceRecorder onTranscriptReady={setTranscript} />
           )}
 
-          {milestones.length > 0 && transcript && !showClarity && !clarityData && (
+          {hasDocument && transcript && milestones.length === 0 && documentStatus !== "ready" && documentStatus !== "error" && (
+            <div className="panel p-6 text-center">
+              <div className="w-2 h-2 bg-brass rounded-full animate-pulse mx-auto mb-3" />
+              <p className="label-tag">Analyzing your notes...</p>
+              <p className="font-mono text-xs text-parchment-muted mt-2">Preparing your key concepts — this will be ready shortly.</p>
+              <div className="mt-4 h-0.5 bg-ink-border rounded-sm overflow-hidden">
+                <div className="h-full bg-brass animate-progress-bar" />
+              </div>
+            </div>
+          )}
+
+          {hasDocument && transcript && milestones.length > 0 && !showClarity && !clarityData && (
             <CoverageDisplay
               milestones={milestones}
               transcript={transcript}
@@ -228,7 +345,7 @@ export default function App() {
             />
           )}
 
-          {showClarity && milestones.length > 0 && transcript && (
+          {showClarity && hasDocument && transcript && milestones.length > 0 && (
             <ClarityDisplay
               transcript={transcript}
               onNext={handleClarityComplete}
