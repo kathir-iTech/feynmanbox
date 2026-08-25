@@ -22,7 +22,7 @@ export default {
           light: "#D4A94D",
         },
         verified: "#5A9B6F",
-        flagged: "#C4453D",
+        flagged: "#E06A5E",
       },
       fontFamily: {
         serif: ['"Fraunces"', "Georgia", "serif"],
@@ -54,8 +54,8 @@ export default {
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
         pulseRed: {
-          "0%, 100%": { boxShadow: "0 0 0 0 rgba(196, 69, 61, 0)" },
-          "50%": { boxShadow: "0 0 20px 4px rgba(196, 69, 61, 0.4)" },
+          "0%, 100%": { boxShadow: "0 0 0 0 rgba(224, 106, 94, 0)" },
+          "50%": { boxShadow: "0 0 20px 4px rgba(224, 106, 94, 0.4)" },
         },
       },
     },

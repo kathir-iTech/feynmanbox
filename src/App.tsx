@@ -25,9 +25,9 @@ function HeaderBar({ onNewSession, onHistory, hasHistory }: { onNewSession: () =
         onClick={onNewSession}
         aria-label="New Session"
         title="New Session"
-        className="w-8 h-8 rounded-panel border border-ink-border bg-ink-light flex items-center justify-center text-parchment-muted hover:text-parchment hover:border-brass transition-colors"
+        className="w-10 h-10 rounded-panel border border-ink-border bg-ink-light flex items-center justify-center text-parchment-muted hover:text-parchment hover:border-brass transition-colors"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
           <path d="M12 5v14M5 12h14" />
         </svg>
       </button>
@@ -35,9 +35,9 @@ function HeaderBar({ onNewSession, onHistory, hasHistory }: { onNewSession: () =
         onClick={onHistory}
         aria-label="History"
         title="History"
-        className="w-8 h-8 rounded-panel border border-ink-border bg-ink-light flex items-center justify-center text-parchment-muted hover:text-parchment hover:border-brass transition-colors relative"
+        className="w-10 h-10 rounded-panel border border-ink-border bg-ink-light flex items-center justify-center text-parchment-muted hover:text-parchment hover:border-brass transition-colors relative"
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5l3 3" />
         </svg>
@@ -48,16 +48,67 @@ function HeaderBar({ onNewSession, onHistory, hasHistory }: { onNewSession: () =
 }
 
 function HistoryPanel({ entries, onClose, onClear }: { entries: HistoryEntry[]; onClose: () => void; onClear: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose()
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+        if (focusable.length === 0) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault()
+            last.focus()
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault()
+            first.focus()
+          }
+        }
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    // Focus the close button when opened
+    closeButtonRef.current?.focus()
+    // Prevent background scroll
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [onClose])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-ink/80 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative panel p-6 w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+      <div className="absolute inset-0 bg-ink/80 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-title"
+        className="relative panel p-6 w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col"
+      >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="w-2 h-2 bg-brass rounded-sm" />
-            <h2 className="font-serif text-lg font-semibold text-parchment">Session History</h2>
+            <h2 id="history-title" className="font-serif text-lg font-semibold text-parchment">Session History</h2>
           </div>
-          <button onClick={onClose} className="text-parchment-muted hover:text-parchment transition-colors">
+          <button
+            ref={closeButtonRef}
+            onClick={onClose}
+            aria-label="Close history"
+            className="text-parchment-muted hover:text-parchment transition-colors"
+          >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
@@ -68,7 +119,7 @@ function HistoryPanel({ entries, onClose, onClear }: { entries: HistoryEntry[]; 
         {entries.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center py-12 text-center">
             <p className="font-mono text-xs text-parchment-muted">No sessions yet.</p>
-            <p className="font-mono text-xs text-parchment-muted/60 mt-1">Complete an evaluation to see history here.</p>
+            <p className="font-mono text-xs text-parchment-muted mt-1">Complete an evaluation to see history here.</p>
           </div>
         ) : (
           <>
@@ -84,10 +135,10 @@ function HistoryPanel({ entries, onClose, onClear }: { entries: HistoryEntry[]; 
                     </span>
                   </div>
                   <div className="mb-2">
-                    <p className="label-tag text-[10px] mb-1">Milestones</p>
+                    <h3 className="label-tag text-[10px] mb-1">Milestones</h3>
                     <ul className="space-y-1">
                       {entry.milestones.map((m) => (
-                        <li key={m.id} className="font-mono text-xs text-parchment/70 truncate">• {m.text}</li>
+                        <li key={m.id} className="font-mono text-xs text-parchment-muted truncate">• {m.text}</li>
                       ))}
                     </ul>
                   </div>
@@ -460,7 +511,7 @@ export default function App() {
                   {combinedResult.is_gaming_attempt ? "Review Needed" : isMastered ? "Mastery Achieved" : "Assessment Complete"}
                 </h2>
               </div>
-              <p className="label-tag mb-4">Combined Evaluation</p>
+              <h3 className="label-tag mb-4">Combined Evaluation</h3>
 
               {/* Overall score */}
               <div className="flex items-baseline gap-3 mb-2">
@@ -477,7 +528,7 @@ export default function App() {
 
               {/* FIX 4: Brief overall summary */}
               <div className="p-4 rounded-panel border border-brass/20 bg-brass/5 mb-6">
-                <p className="label-tag text-[10px] mb-1">Summary</p>
+                <h3 className="label-tag text-[10px] mb-1">Summary</h3>
                 <p className="font-serif text-sm text-parchment leading-relaxed">{combinedResult.summary}</p>
               </div>
 
@@ -485,7 +536,7 @@ export default function App() {
               {combinedResult.is_gaming_attempt && (
                 <div className="p-4 rounded-panel border border-flagged/60 bg-flagged/10 mb-6 animate-shake">
                   <p className="font-mono text-sm font-bold text-flagged tracking-wide">Explanation flagged for review</p>
-                  <p className="font-mono text-xs text-flagged/80 mt-2 leading-relaxed">{combinedResult.reasoning}</p>
+                  <p className="font-mono text-xs text-flagged mt-2 leading-relaxed">{combinedResult.reasoning}</p>
                   <p className="font-mono text-xs text-parchment-muted mt-3">Clarity was set to 0. Focus on connecting ideas with words like “because,” “therefore,” and “this means” to show how concepts relate.</p>
                 </div>
               )}
@@ -495,7 +546,7 @@ export default function App() {
                 <div className="mb-6">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-2 h-2 bg-verified rounded-sm" />
-                    <p className="label-tag text-[10px]">What you understood well</p>
+                    <h3 className="label-tag text-[10px]">What you understood well</h3>
                     <span className="font-mono text-[10px] text-verified">{combinedResult.details.filter((d) => d.covered).length} • covered</span>
                   </div>
                   <div className="space-y-3">
@@ -511,7 +562,7 @@ export default function App() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="font-serif text-sm text-parchment leading-snug">{detail.concept}</p>
-                              <p className="font-mono text-xs text-verified/80 mt-1.5 leading-relaxed">{detail.feedback}</p>
+                              <p className="font-mono text-xs text-verified mt-1.5 leading-relaxed">{detail.feedback}</p>
                             </div>
                           </div>
                         </div>
@@ -525,7 +576,7 @@ export default function App() {
                 <div className="mb-6">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-2 h-2 bg-flagged rounded-sm" />
-                    <p className="label-tag text-[10px]">What you missed or need to revisit</p>
+                    <h3 className="label-tag text-[10px]">What you missed or need to revisit</h3>
                     <span className="font-mono text-[10px] text-flagged">{combinedResult.details.filter((d) => !d.covered).length} • to review</span>
                   </div>
                   <div className="space-y-3">
@@ -553,7 +604,7 @@ export default function App() {
                 <div className="p-4 rounded-panel border border-ink-border bg-ink mb-6">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-2 h-2 bg-brass rounded-sm" />
-                    <p className="label-tag text-[10px]">Clarity & Coherence</p>
+                    <h3 className="label-tag text-[10px]">Clarity & Coherence</h3>
                     <span className="font-mono text-xs text-parchment ml-auto">{combinedResult.clarity_score}/100</span>
                   </div>
                   <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-3">
@@ -576,15 +627,16 @@ export default function App() {
                 <summary className="font-mono text-xs text-parchment-muted cursor-pointer hover:text-parchment transition-colors tracking-wider">
                   View transcript
                 </summary>
-                <p className="mt-2 font-mono text-xs text-parchment/60 whitespace-pre-wrap leading-relaxed">{transcript}</p>
+                <p className="mt-2 font-mono text-xs text-parchment-muted whitespace-pre-wrap leading-relaxed">{transcript}</p>
               </details>
             </div>
           )}
 
-          {isMastered && milestones.length > 0 && (
+          {isMastered && milestones.length > 0 && combinedResult && (
             <ExportFeature
               milestones={milestones}
               transcript={transcript}
+              details={combinedResult.details}
               onReset={handleReset}
             />
           )}

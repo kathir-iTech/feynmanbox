@@ -59,7 +59,10 @@ export const VoiceRecorder: React.FC<{
     }
   }, [])
 
+  const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+
   const drawWaveform = () => {
+    if (prefersReducedMotion) return
     if (!analyserRef.current || !mainPathRef.current) {
       animationRef.current = requestAnimationFrame(drawWaveform)
       return
@@ -143,22 +146,27 @@ export const VoiceRecorder: React.FC<{
       })
       streamRef.current = stream
 
-      // Setup waveform
-      try {
-        const AudioCtx =
-          (window as unknown as { AudioContext: typeof AudioContext }).AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-        const ctx = new AudioCtx()
-        audioContextRef.current = ctx
-        if (ctx.state === "suspended") await ctx.resume()
-        const analyser = ctx.createAnalyser()
-        analyser.fftSize = 256
-        const source = ctx.createMediaStreamSource(stream)
-        source.connect(analyser)
-        analyserRef.current = analyser
-        drawWaveform()
-      } catch {
-        setUseFallbackWaveform(true)
+      // Setup waveform — respect reduced motion preference
+      const shouldAnimate = !prefersReducedMotion
+      if (!shouldAnimate) {
+        setUseFallbackWaveform(false)
+      } else {
+        try {
+          const AudioCtx =
+            (window as unknown as { AudioContext: typeof AudioContext }).AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+          const ctx = new AudioCtx()
+          audioContextRef.current = ctx
+          if (ctx.state === "suspended") await ctx.resume()
+          const analyser = ctx.createAnalyser()
+          analyser.fftSize = 256
+          const source = ctx.createMediaStreamSource(stream)
+          source.connect(analyser)
+          analyserRef.current = analyser
+          drawWaveform()
+        } catch {
+          setUseFallbackWaveform(true)
+        }
       }
 
       // Setup MediaRecorder — FIX 2: high bitrate for better accuracy
@@ -390,7 +398,7 @@ export const VoiceRecorder: React.FC<{
             <div className="w-2 h-2 bg-brass rounded-sm" />
             <h2 className="font-serif text-xl font-semibold text-parchment">Voice Testimony</h2>
           </div>
-          <p className="label-tag mb-3">Microphone Input</p>
+          <h3 className="label-tag mb-3">Microphone Input</h3>
           <p className="text-parchment-muted text-sm mb-5 leading-relaxed">
             Explain your understanding of the milestones aloud. The system will transcribe and analyze your explanation for
             coverage and coherence.
@@ -413,7 +421,7 @@ export const VoiceRecorder: React.FC<{
             <h2 className="font-serif text-xl font-semibold text-parchment">Recording</h2>
             <span className="ml-auto font-mono text-xs text-parchment-muted">{formatTime(recordingTime)}</span>
           </div>
-          <p className="label-tag mb-4">Live Signal</p>
+          <h3 className="label-tag mb-4">Live Signal</h3>
 
           <div className="polygraph-grid rounded-panel border border-ink-border p-4 bg-ink">
             <div className="flex items-center gap-2 mb-2">
@@ -446,15 +454,15 @@ export const VoiceRecorder: React.FC<{
           </div>
           {/* FIX 1: Live preview captions — visual only, discarded after */}
           <div className="mt-3 p-3 rounded-panel bg-ink border border-ink-border min-h-[52px] max-h-[96px] overflow-y-auto">
-            <p className="label-tag text-[10px] mb-1">Live preview — approximate</p>
+            <h3 className="label-tag text-[10px] mb-1">Live preview — approximate</h3>
             {livePreview || liveInterim ? (
-              <p className="font-mono text-xs text-parchment/60 leading-relaxed whitespace-pre-wrap">
+              <p className="font-mono text-xs text-parchment-muted leading-relaxed whitespace-pre-wrap">
                 {livePreview}
                 {livePreview && liveInterim ? " " : ""}
-                <span className="italic text-parchment/40">{liveInterim}</span>
+                <span className="italic text-parchment-muted">{liveInterim}</span>
               </p>
             ) : (
-              <p className="font-mono text-xs text-parchment-muted/40 italic">Listening… approximate captions will appear here.</p>
+              <p className="font-mono text-xs text-parchment-muted italic">Listening… approximate captions will appear here.</p>
             )}
           </div>
           <p className="font-mono text-[10px] text-parchment-muted mt-2 text-center">Speak clearly — your audio is being captured continuously.</p>
@@ -471,7 +479,7 @@ export const VoiceRecorder: React.FC<{
       {isTranscribing && (
         <div className="text-center py-8">
           <div className="w-2 h-2 bg-brass rounded-full animate-pulse mx-auto mb-3" />
-          <p className="label-tag">Transcribing your explanation...</p>
+          <h3 className="label-tag">Transcribing your explanation...</h3>
           <p className="font-mono text-xs text-parchment-muted mt-2">This usually takes a few seconds.</p>
           <div className="mt-6 h-0.5 bg-ink-border rounded-sm overflow-hidden">
             <div className="h-full bg-brass animate-progress-bar" />
@@ -485,15 +493,16 @@ export const VoiceRecorder: React.FC<{
             <div className="w-2 h-2 bg-verified rounded-sm" />
             <h2 className="font-serif text-xl font-semibold text-parchment">Review Your Transcript</h2>
           </div>
-          <p className="label-tag mb-1">REVIEW YOUR TRANSCRIPT</p>
+          <h3 className="label-tag mb-1">REVIEW YOUR TRANSCRIPT</h3>
           <p className="font-mono text-xs text-parchment-muted mb-3">Fix any errors before evaluation</p>
 
           <textarea
             value={editableTranscript}
             onChange={(e) => setEditableTranscript(e.target.value)}
             rows={6}
-            className="w-full rounded-panel bg-ink border border-ink-border p-4 font-mono text-sm text-parchment placeholder:text-parchment-muted/50 focus:outline-none focus:border-brass transition-colors min-h-[120px] max-h-[220px] overflow-y-auto leading-relaxed"
+            className="w-full rounded-panel bg-ink border border-ink-border p-4 font-mono text-sm text-parchment placeholder:text-parchment-muted focus:outline-none focus:border-brass transition-colors min-h-[120px] max-h-[220px] overflow-y-auto leading-relaxed"
             placeholder="Your transcript will appear here…"
+            aria-label="Edit transcript"
           />
 
           {error && (

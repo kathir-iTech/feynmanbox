@@ -45,16 +45,25 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
     onPasteText(pasteText)
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault()
+      inputRef.current?.click()
+    }
+  }
+
   return (
     <div className="panel p-6 relative overflow-hidden">
       <div className="flex items-center gap-3 mb-5">
         <div className="w-2 h-2 bg-brass rounded-sm" />
         <h2 className="font-serif text-xl font-semibold text-parchment">Context Anchor</h2>
       </div>
-      <p className="label-tag mb-4">Lecture Notes Input</p>
+      <h3 className="label-tag mb-4">Lecture Notes Input</h3>
 
-      {/* Upload zone */}
-      <div
+      {/* Upload zone - accessible button */}
+      <button
+        type="button"
+        aria-label="Upload document — PDF, DOCX or TXT, maximum 10MB. Click to browse or drag and drop."
         onDragOver={(e) => {
           e.preventDefault()
           setDragOver(true)
@@ -62,7 +71,8 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        className={`w-full rounded-panel border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
+        onKeyDown={handleKeyDown}
+        className={`w-full rounded-panel border-2 border-dashed p-8 text-center cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-brass focus:ring-offset-2 focus:ring-offset-ink ${
           dragOver ? "border-brass bg-brass/5" : "border-ink-border bg-ink hover:border-brass/50 hover:bg-ink-light"
         }`}
       >
@@ -70,28 +80,31 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
           ref={inputRef}
           type="file"
           accept={acceptTypes}
-          className="hidden"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
           onChange={(e) => handleFiles(e.target.files)}
+          onClick={(e) => e.stopPropagation()}
         />
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-panel border border-ink-border bg-ink-light flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-parchment-muted">
+        <span className="flex flex-col items-center gap-3">
+          <span className="w-10 h-10 rounded-panel border border-ink-border bg-ink-light flex items-center justify-center">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-parchment-muted" aria-hidden="true">
               <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
               <polyline points="14 2 14 8 20 8" />
               <line x1="12" y1="18" x2="12" y2="12" />
               <polyline points="9 15 12 12 15 15" />
             </svg>
-          </div>
-          <div>
-            <p className="font-mono text-sm text-parchment">Drop your notes here</p>
-            <p className="font-mono text-xs text-parchment-muted mt-1">or click to browse — PDF, DOCX, TXT</p>
-          </div>
-          <p className="font-mono text-[10px] text-parchment-muted/60">Maximum file size: 10MB</p>
-        </div>
-      </div>
+          </span>
+          <span>
+            <span className="font-mono text-sm text-parchment block">Drop your notes here</span>
+            <span className="font-mono text-xs text-parchment-muted mt-1 block">or click to browse — PDF, DOCX, TXT</span>
+          </span>
+          <span className="font-mono text-[10px] text-parchment-muted block">Maximum file size: 10MB</span>
+        </span>
+      </button>
 
       {(fileError || error) && (
-        <div className="mt-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
+        <div role="alert" className="mt-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
           {fileError || error}
         </div>
       )}
@@ -119,12 +132,14 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
 
       {showPaste && (
         <div className="mt-4 animate-fade-in">
+          <label htmlFor="paste-notes" className="sr-only">Paste your lecture notes</label>
           <textarea
+            id="paste-notes"
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
             placeholder="Paste your lecture notes, article excerpt, or study material here..."
             rows={4}
-            className="w-full bg-ink border border-ink-border rounded-panel p-3 font-mono text-sm text-parchment placeholder:text-parchment-muted/50 focus:outline-none focus:border-brass transition-colors min-h-[120px]"
+            className="w-full bg-ink border border-ink-border rounded-panel p-3 font-mono text-sm text-parchment placeholder:text-parchment-muted focus:outline-none focus:border-brass transition-colors min-h-[120px]"
           />
           <button
             onClick={onPasteSubmit}
