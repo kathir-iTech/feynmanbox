@@ -27,8 +27,7 @@ export async function generateMilestones(notes: string, apiKey: string): Promise
   })
 
   if (!response.ok) {
-    const errorData = await response.text()
-    throw new Error(`Analysis service error: ${response.status} - ${errorData}`)
+    throw new Error("We couldn't complete the analysis. Please try again.")
   }
 
   const data = await response.json()
@@ -51,9 +50,7 @@ export async function generateMilestones(notes: string, apiKey: string): Promise
       error: null,
       loading: false
     }
-  } catch (parseErr) {
-    console.error("[generateMilestones] Raw Gemini response:", text)
-    console.error("[generateMilestones] Parse error:", parseErr)
+  } catch {
     return {
       success: false,
       milestones: [],

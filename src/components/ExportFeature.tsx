@@ -4,7 +4,7 @@ import type { Milestone } from "../types"
 export const ExportFeature: React.FC<{
   milestones: Milestone[]
   transcript: string
-  onReset: () => void
+  onReset?: () => void
 }> = ({ milestones, transcript }) => {
   const [downloading, setDownloading] = useState(false)
 

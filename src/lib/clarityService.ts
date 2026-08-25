@@ -7,12 +7,6 @@ export async function rateClarity(
   transcript: string,
   apiKey: string
 ): Promise<ClarityResult> {
-  console.log("[rateClarity] → request", {
-    transcriptPreview: transcript.substring(0, 120),
-    transcriptLength: transcript.length,
-    apiKeyPresent: !!apiKey,
-  })
-
   const payload = {
     contents: [
       {
@@ -29,8 +23,6 @@ export async function rateClarity(
     }
   }
 
-  console.log("[rateClarity] → fetch", API_BASE)
-
   const response = await fetch(`${API_BASE}?key=${apiKey}`, {
     method: "POST",
     headers: {
@@ -39,36 +31,26 @@ export async function rateClarity(
     body: JSON.stringify(payload)
   })
 
-  console.log("[rateClarity] ← HTTP", response.status, response.statusText)
-
   if (!response.ok) {
-    const errorData = await response.text()
-    console.error("[rateClarity] ← API error body:", errorData)
-    throw new Error(`Analysis service error: ${response.status} - ${errorData}`)
+    throw new Error("We couldn't complete the analysis. Please try again.")
   }
 
   const data = await response.json()
-  console.log("[rateClarity] ← raw JSON response:", JSON.stringify(data).substring(0, 500))
 
   if (!data.candidates || data.candidates.length === 0) {
-    console.error("[rateClarity] No candidates", data)
     throw new Error("We couldn't complete the analysis. Please try again.")
   }
 
   const text = data.candidates[0].content.parts[0].text
-  console.log("[rateClarity] ← Gemini text part:", text)
 
   try {
     const parsed = parseGeminiJson<{ clarity_score: number; is_gaming_attempt: boolean; reasoning: string }>(text)
-    console.log("[rateClarity] ← parsed object:", parsed)
     return {
       clarity_score: Math.max(0, Math.min(100, Math.round(parsed.clarity_score))),
       is_gaming_attempt: Boolean(parsed.is_gaming_attempt),
       reasoning: String(parsed.reasoning || ""),
     }
-  } catch (parseErr) {
-    console.error("[rateClarity] Raw Gemini response:", text)
-    console.error("[rateClarity] Parse error:", parseErr)
+  } catch {
     throw new Error("We couldn't interpret the analysis result. Please try again.")
   }
 }

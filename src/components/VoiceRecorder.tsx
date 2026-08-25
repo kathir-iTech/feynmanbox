@@ -28,7 +28,6 @@ function LivePolygraphWaveform({ isRecording }: { isRecording: boolean }) {
         if (ctx.state !== "closed") {
           ctx.close().catch(() => {})
         }
-        console.log("[Waveform] AudioContext closed, stream stopped")
       } else {
         analyserRef.current = null
       }
@@ -45,7 +44,6 @@ function LivePolygraphWaveform({ isRecording }: { isRecording: boolean }) {
 
     async function startAudio() {
       try {
-        console.log("[Waveform] Requesting microphone for waveform visualisation…")
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop())
@@ -67,12 +65,6 @@ function LivePolygraphWaveform({ isRecording }: { isRecording: boolean }) {
         const source = ctx.createMediaStreamSource(stream)
         source.connect(analyser)
         analyserRef.current = analyser
-
-        console.log("[Waveform] AudioContext active", {
-          sampleRate: ctx.sampleRate,
-          fftSize: analyser.fftSize,
-          state: ctx.state,
-        })
 
         const bufferLength = analyser.fftSize
         const dataArray = new Uint8Array(bufferLength)
@@ -136,8 +128,7 @@ function LivePolygraphWaveform({ isRecording }: { isRecording: boolean }) {
         }
 
         draw()
-      } catch (err) {
-        console.warn("[Waveform] getUserMedia failed — using decorative fallback", err)
+      } catch {
         setUseFallback(true)
       }
     }

@@ -37,42 +37,23 @@ export const CoverageDisplay: React.FC<{
   }, [transcript, milestones])
 
   const evaluate = async () => {
-    console.log("[CoverageDisplay] button onClick → evaluate() fired", {
-      hasTranscript: !!transcript.trim(),
-      transcriptLength: transcript.length,
-      transcriptPreview: transcript.substring(0, 80),
-      hasApiKey: !!apiKey,
-      apiKeyPrefix: apiKey ? apiKey.substring(0, 8) + "…" : "(none)",
-      inFlight: inFlightRef.current,
-    })
-
-    if (inFlightRef.current) {
-      console.log("[CoverageDisplay] Ignoring click — request already in flight")
-      return
-    }
+    if (inFlightRef.current) return
 
     if (!transcript.trim()) {
-      console.warn("[CoverageDisplay] No transcript to evaluate")
       setState((prev) => ({ ...prev, error: "Please provide an explanation to analyze." }))
       return
     }
 
     if (!apiKey) {
-      console.warn("[CoverageDisplay] API key missing")
       setState((prev) => ({ ...prev, error: "Analysis is temporarily unavailable. Please try again later." }))
       return
     }
 
     inFlightRef.current = true
     setState((prev) => ({ ...prev, loading: true, error: null }))
-    console.log("[CoverageDisplay] → calling checkCoverage(milestones, transcript, apiKey)")
 
     try {
       const result = await checkCoverage(milestones, transcript, apiKey)
-      console.log("[CoverageDisplay] ← checkCoverage SUCCESS, raw result:", result)
-      // Temporary log required by Issue 3 — proves parse succeeded and data is used
-      console.log("[CoverageDisplay] parsed milestones_covered:", result.milestones_covered, "coverage_score:", result.coverage_score)
-      console.log("[CoverageDisplay] → setState({ covered, coverageScore, evaluated:true }) — UI should update now")
       setState({
         covered: result.milestones_covered,
         coverageScore: result.coverage_score,
@@ -80,10 +61,8 @@ export const CoverageDisplay: React.FC<{
         error: null,
         evaluated: true,
       })
-      console.log("[CoverageDisplay] UI state updated — coverageScore displayed should be", result.coverage_score)
     } catch (err: unknown) {
-      console.error("[CoverageDisplay] ← checkCoverage FAILED:", err)
-      const message = err instanceof Error ? err.message : "Unexpected error"
+      const message = err instanceof Error ? err.message : "We couldn't complete the analysis. Please try again."
       setState((prev) => ({
         ...prev,
         covered: milestones.map(() => false),
@@ -92,21 +71,10 @@ export const CoverageDisplay: React.FC<{
         error: message,
         evaluated: false,
       }))
-      console.log("[CoverageDisplay] error state set, UI should show red error box with message:", message)
     } finally {
       inFlightRef.current = false
-      console.log("[CoverageDisplay] evaluate() finally — inFlight reset to false")
     }
   }
-
-  // Debug trace: log render state each time
-  console.log("[CoverageDisplay] render", {
-    transcriptLength: transcript.length,
-    loading: state.loading,
-    evaluated: state.evaluated,
-    coverageScore: state.coverageScore,
-    error: state.error,
-  })
 
   return (
     <div className={`panel p-6 relative overflow-hidden ${
@@ -197,7 +165,7 @@ export const CoverageDisplay: React.FC<{
                     </div>
                     {verified && (
                       <span className="font-mono text-[10px] text-verified tracking-wider flex-shrink-0 mt-0.5">
-                        [VERIFIED]
+                        Verified
                       </span>
                     )}
                   </div>

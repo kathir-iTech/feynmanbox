@@ -109,11 +109,11 @@ export const MasteryLoop: React.FC<{
     content = (
       <div className="p-4 rounded-panel border border-flagged/60 bg-flagged/10 animate-shake animate-pulse-red">
         <p className="font-mono text-sm font-bold text-flagged tracking-wide">
-          [ANALYSIS FLAGGED]
+          Explanation flagged for review
         </p>
         <p className="font-mono text-xs text-flagged/70 mt-2">{state.reasoning}</p>
         <button onClick={reset} className="mt-3 text-brass text-xs font-mono hover:text-brass-light transition-colors">
-          [RETRY]
+          Try again
         </button>
       </div>
     )
@@ -123,7 +123,7 @@ export const MasteryLoop: React.FC<{
         <p className="label-tag text-[10px] mb-2">Coaching Directive</p>
         <p className="font-serif text-sm text-parchment leading-relaxed">{state.hint}</p>
         <button onClick={reset} className="mt-3 text-brass text-xs font-mono hover:text-brass-light transition-colors">
-          [RETRY]
+          Try again
         </button>
       </div>
     )

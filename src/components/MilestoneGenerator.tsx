@@ -33,7 +33,7 @@ export const MilestoneGenerator: React.FC<{
         setError(result.error || "We couldn't prepare your milestones. Please try again.")
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unexpected error"
+      const message = err instanceof Error ? err.message : "We couldn't complete the request. Please try again."
       setError(message)
     } finally {
       setLoading(false)
@@ -59,7 +59,7 @@ export const MilestoneGenerator: React.FC<{
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder="Paste lecture notes here..."
+        placeholder="Paste your lecture notes, article excerpt, or study material here..."
         rows={4}
         className="w-full bg-ink border border-ink-border rounded-panel p-3 font-mono text-sm text-parchment placeholder:text-parchment-muted/50 focus:outline-none focus:border-brass transition-colors min-h-[150px]"
       />

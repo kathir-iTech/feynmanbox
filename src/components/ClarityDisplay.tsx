@@ -61,16 +61,7 @@ export const ClarityDisplay: React.FC<{
   }, [transcript])
 
   const evaluate = async () => {
-    console.log("[ClarityDisplay] button onClick → evaluate() fired", {
-      hasTranscript: !!transcript.trim(),
-      transcriptLength: transcript.length,
-      hasApiKey: !!apiKey,
-    })
-
-    if (inFlightRef.current) {
-      console.log("[ClarityDisplay] Ignoring click — in flight")
-      return
-    }
+    if (inFlightRef.current) return
 
     if (!transcript.trim()) {
       setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: "Please provide an explanation to analyze.", evaluated: false })
@@ -84,12 +75,9 @@ export const ClarityDisplay: React.FC<{
 
     inFlightRef.current = true
     setState((prev) => ({ ...prev, loading: true, error: null }))
-    console.log("[ClarityDisplay] → calling rateClarity")
 
     try {
       const result: ClarityResult = await rateClarity(transcript, apiKey)
-      console.log("[ClarityDisplay] ← rateClarity result:", result)
-      console.log("[ClarityDisplay] parsed object:", result)
       const finalClarity = result.is_gaming_attempt ? 0 : result.clarity_score
       setState({
         clarityScore: finalClarity,
@@ -99,10 +87,8 @@ export const ClarityDisplay: React.FC<{
         error: null,
         evaluated: true,
       })
-      console.log("[ClarityDisplay] UI should now show", result.is_gaming_attempt ? "FLAGGED" : `Clarity ${finalClarity}%`)
     } catch (err: unknown) {
-      console.error("[ClarityDisplay] FAILED:", err)
-      const message = err instanceof Error ? err.message : "Unexpected error"
+      const message = err instanceof Error ? err.message : "We couldn't complete the analysis. Please try again."
       setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: message, evaluated: false })
     } finally {
       inFlightRef.current = false
@@ -150,12 +136,12 @@ export const ClarityDisplay: React.FC<{
       {isFlagged && (
         <div className="mt-6 p-4 rounded-panel border border-flagged/60 bg-flagged/10 animate-fade-in">
           <p className="font-mono text-sm font-bold text-flagged tracking-wide">
-            [ANALYSIS FLAGGED: INCOHERENT PATTERN DETECTED]
+            Explanation flagged for review
           </p>
           <p className="font-mono text-xs text-flagged/70 mt-2">{state.reasoning}</p>
           <p className="font-mono text-[10px] text-parchment-muted mt-3">
-            Clarity score overridden to 0. The system detected keyword-listing
-            without logical sentence structure.
+            Clarity was set to 0. Focus on connecting ideas with words like
+            “because,” “therefore,” and “this means” to show how concepts relate.
           </p>
         </div>
       )}
