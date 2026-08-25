@@ -5,7 +5,7 @@ export const ExportFeature: React.FC<{
   milestones: Milestone[]
   transcript: string
   onReset: () => void
-}> = ({ milestones, transcript, onReset }) => {
+}> = ({ milestones, transcript }) => {
   const [downloading, setDownloading] = useState(false)
 
   const exportData: Record<string, string> = {}
@@ -45,8 +45,8 @@ export const ExportFeature: React.FC<{
       <p className="label-tag mb-4">Study Card Generation</p>
 
       <p className="font-mono text-xs text-parchment-muted mb-5 leading-relaxed">
-        Download your milestones and explanations as a JSON file for
-        spaced-repetition study. Front: milestone question. Back: your explanation.
+        Save your milestones and personal explanations as study cards for
+        later review and practice.
       </p>
 
       <button
@@ -56,11 +56,7 @@ export const ExportFeature: React.FC<{
           downloading ? "opacity-50 cursor-not-allowed" : ""
         }`}
       >
-        {downloading ? "Generating..." : "Download Study Cards"}
-      </button>
-
-      <button onClick={onReset} className="btn-ghost w-full mt-3">
-        Start Over
+        {downloading ? "Preparing your download..." : "Download Study Cards"}
       </button>
     </div>
   )

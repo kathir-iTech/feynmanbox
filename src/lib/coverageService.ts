@@ -56,7 +56,7 @@ export async function checkCoverage(
   if (!response.ok) {
     const errorData = await response.text()
     console.error("[checkCoverage] ← API error body:", errorData)
-    throw new Error(`Gemini API error: ${response.status} - ${errorData}`)
+    throw new Error(`Analysis service error: ${response.status} - ${errorData}`)
   }
 
   const data = await response.json()
@@ -64,7 +64,7 @@ export async function checkCoverage(
 
   if (!data.candidates || data.candidates.length === 0) {
     console.error("[checkCoverage] No candidates in response", data)
-    throw new Error("No response from Gemini API")
+    throw new Error("We couldn't complete the analysis. Please try again.")
   }
 
   const text = data.candidates[0].content.parts[0].text
@@ -99,6 +99,6 @@ export async function checkCoverage(
   } catch (parseErr) {
     console.error("[checkCoverage] Raw Gemini response:", text)
     console.error("[checkCoverage] Parse error:", parseErr)
-    throw new Error(`Failed to parse coverage response. Raw: ${text.substring(0, 200)}`)
+    throw new Error("We couldn't interpret the analysis result. Please try again.")
   }
 }

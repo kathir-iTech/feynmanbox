@@ -27,7 +27,7 @@ function AnimatedScore({ value }: { value: number }) {
 
 export const ClarityDisplay: React.FC<{
   transcript: string
-  onNext?: () => void
+  onNext?: (result?: { score: number; isGaming: boolean; reasoning: string }) => void
 }> = ({ transcript, onNext }) => {
   const [state, setState] = useState<{
     clarityScore: number
@@ -49,6 +49,7 @@ export const ClarityDisplay: React.FC<{
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""
 
   useEffect(() => {
+    inFlightRef.current = false
     setState({
       clarityScore: 0,
       isGaming: false,
@@ -72,12 +73,12 @@ export const ClarityDisplay: React.FC<{
     }
 
     if (!transcript.trim()) {
-      setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: "[ERROR] No transcript", evaluated: false })
+      setState({ clarityScore: 0, isGaming: false, reasoning: "", loading: false, error: "Please provide an explanation to analyze.", evaluated: false })
       return
     }
 
     if (!apiKey) {
-      setState((prev) => ({ ...prev, error: "[ERROR] API key not configured", loading: false }))
+      setState((prev) => ({ ...prev, error: "Analysis is temporarily unavailable. Please try again later.", loading: false }))
       return
     }
 
@@ -130,14 +131,14 @@ export const ClarityDisplay: React.FC<{
 
       <button
         onClick={evaluate}
-        disabled={state.loading || !transcript.trim() || !apiKey}
+        disabled={state.loading || !transcript.trim()}
         className={`btn-primary w-full ${
-          state.loading || !transcript.trim() || !apiKey
+          state.loading || !transcript.trim()
             ? "opacity-40 cursor-not-allowed"
             : ""
         }`}
       >
-        {state.loading ? "Analyzing..." : "Rate Clarity"}
+        {state.loading ? "Analyzing your explanation..." : "Rate Clarity"}
       </button>
 
       {state.error && !state.loading && (
@@ -181,8 +182,8 @@ export const ClarityDisplay: React.FC<{
       )}
 
       {state.evaluated && !state.loading && (
-        <button onClick={onNext} className="btn-primary w-full mt-6">
-          Proceed
+        <button onClick={() => onNext?.({ score: state.clarityScore, isGaming: state.isGaming, reasoning: state.reasoning })} className="btn-primary w-full mt-6">
+          Continue
         </button>
       )}
     </div>

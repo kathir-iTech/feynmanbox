@@ -227,7 +227,7 @@ export const VoiceRecorder: React.FC<{
     <div className="panel p-6">
       {!isSupported && (
         <div className="p-4 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
-          [SYSTEM] Web Speech API unavailable. Use Chrome or Edge.
+          Voice input isn't supported in this browser. Please try Chrome or Edge for the best experience.
         </div>
       )}
 
@@ -263,13 +263,23 @@ export const VoiceRecorder: React.FC<{
 
           <LivePolygraphWaveform isRecording={state.isRecording} />
 
-          {state.interimTranscript && (
-            <div className="mt-4 p-3 rounded-panel bg-ink border border-ink-border">
-              <p className="font-mono text-xs text-parchment-muted italic">
-                {state.interimTranscript}
+          <div className="mt-4 p-4 rounded-panel bg-ink border border-ink-border min-h-[96px] max-h-[180px] overflow-y-auto">
+            <p className="label-tag text-[10px] mb-2">Live Transcript — Read Only</p>
+            {state.finalTranscript || state.interimTranscript ? (
+              <p className="font-mono text-xs text-parchment leading-relaxed whitespace-pre-wrap">
+                {state.finalTranscript}
+                {state.finalTranscript && state.interimTranscript ? " " : ""}
+                <span className="italic text-parchment/70">{state.interimTranscript}</span>
               </p>
-            </div>
-          )}
+            ) : (
+              <p className="font-mono text-xs text-parchment-muted/50 italic">
+                Listening… your words will appear here as you speak.
+              </p>
+            )}
+          </div>
+          <p className="font-mono text-[10px] text-parchment-muted mt-2">
+            Your finalized words stay pinned above while you speak. Only the faint italic text is still being formed.
+          </p>
 
           <button
             onClick={stopRecording}

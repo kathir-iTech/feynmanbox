@@ -18,7 +18,7 @@ export const MilestoneGenerator: React.FC<{
     }
 
     if (!apiKey) {
-      setError("API key not configured. Set VITE_GEMINI_API_KEY in Vercel.")
+      setError("Preparation is temporarily unavailable. Please try again later.")
       return
     }
 
@@ -30,7 +30,7 @@ export const MilestoneGenerator: React.FC<{
       if (result.success) {
         onMilestonesGenerated(result.milestones)
       } else {
-        setError(result.error || "Failed to generate milestones.")
+        setError(result.error || "We couldn't prepare your milestones. Please try again.")
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Unexpected error"
@@ -67,14 +67,14 @@ export const MilestoneGenerator: React.FC<{
       <div className="mt-4">
         <button
           onClick={generate}
-          disabled={!notes.trim() || loading || !apiKey}
+          disabled={!notes.trim() || loading}
           className={`btn-primary w-full sm:w-auto ${
-            loading || !notes.trim() || !apiKey
+            loading || !notes.trim()
               ? "opacity-40 cursor-not-allowed"
               : ""
           }`}
         >
-          {loading ? "Generating..." : "Generate 3 Milestones"}
+          {loading ? "Preparing your milestones..." : "Generate 3 Milestones"}
         </button>
       </div>
 

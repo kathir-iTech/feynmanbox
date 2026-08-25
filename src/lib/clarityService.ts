@@ -18,7 +18,7 @@ export async function rateClarity(
       {
         parts: [
           {
-            text: `Rate this explanation's clarity from 0-100. Penalize heavily for: excessive unexplained jargon, disconnected keyword-listing without logical flow, missing connective words (because, therefore, consequently, this means). Also return a boolean 'is_gaming_attempt' set to true if the explanation is just a list of terms with no logical sentence structure. Output ONLY valid JSON (no markdown, no code fences): {"clarity_score": 0-100, "is_gaming_attempt": true/false, "reasoning": "one sentence explanation"}. Transcript: "${transcript}"`
+            text: `Rate this explanation's clarity from 0-100. Penalize heavily for: excessive unexplained jargon, disconnected keyword-listing without logical flow, missing connective words (because, therefore, consequently, this means). Also return a boolean 'is_gaming_attempt' set to true if the explanation is just a list of terms with no logical sentence structure. For the reasoning field, explain specifically which parts of THIS explanation lacked logical connectors or coherent structure, referencing actual words or phrases from the transcript. Be concrete and specific — do not give a generic template sentence. Output ONLY valid JSON (no markdown, no code fences): {"clarity_score": 0-100, "is_gaming_attempt": true/false, "reasoning": "specific explanation referencing transcript content"}. Transcript: "${transcript}"`
           }
         ]
       }
@@ -44,7 +44,7 @@ export async function rateClarity(
   if (!response.ok) {
     const errorData = await response.text()
     console.error("[rateClarity] ← API error body:", errorData)
-    throw new Error(`Gemini API error: ${response.status} - ${errorData}`)
+    throw new Error(`Analysis service error: ${response.status} - ${errorData}`)
   }
 
   const data = await response.json()
@@ -52,7 +52,7 @@ export async function rateClarity(
 
   if (!data.candidates || data.candidates.length === 0) {
     console.error("[rateClarity] No candidates", data)
-    throw new Error("No response from Gemini API")
+    throw new Error("We couldn't complete the analysis. Please try again.")
   }
 
   const text = data.candidates[0].content.parts[0].text
@@ -69,6 +69,6 @@ export async function rateClarity(
   } catch (parseErr) {
     console.error("[rateClarity] Raw Gemini response:", text)
     console.error("[rateClarity] Parse error:", parseErr)
-    throw new Error(`Failed to parse clarity response. Raw: ${text.substring(0, 200)}`)
+    throw new Error("We couldn't interpret the analysis result. Please try again.")
   }
 }

@@ -5,7 +5,7 @@ import type { Milestone } from "../types"
 export const CoverageDisplay: React.FC<{
   milestones: Milestone[]
   transcript: string
-  onEvaluated: () => void
+  onEvaluated: (result?: { covered: boolean[]; score: number }) => void
 }> = ({ milestones, transcript, onEvaluated }) => {
   const [state, setState] = useState<{
     covered: boolean[]
@@ -26,6 +26,7 @@ export const CoverageDisplay: React.FC<{
 
   // Reset when transcript or milestones change (new recording / new milestones)
   useEffect(() => {
+    inFlightRef.current = false
     setState({
       covered: milestones.map(() => false),
       coverageScore: 0,
@@ -52,13 +53,13 @@ export const CoverageDisplay: React.FC<{
 
     if (!transcript.trim()) {
       console.warn("[CoverageDisplay] No transcript to evaluate")
-      setState((prev) => ({ ...prev, error: "[ERROR] No transcript provided" }))
+      setState((prev) => ({ ...prev, error: "Please provide an explanation to analyze." }))
       return
     }
 
     if (!apiKey) {
       console.warn("[CoverageDisplay] API key missing")
-      setState((prev) => ({ ...prev, error: "[ERROR] API key not configured" }))
+      setState((prev) => ({ ...prev, error: "Analysis is temporarily unavailable. Please try again later." }))
       return
     }
 
@@ -134,14 +135,14 @@ export const CoverageDisplay: React.FC<{
 
       <button
         onClick={evaluate}
-        disabled={state.loading || !transcript.trim() || !apiKey}
+        disabled={state.loading || !transcript.trim()}
         className={`btn-primary w-full ${
-          state.loading || !transcript.trim() || !apiKey
+          state.loading || !transcript.trim()
             ? "opacity-40 cursor-not-allowed"
             : ""
         }`}
       >
-        {state.loading ? "Analyzing..." : "Evaluate Coverage"}
+        {state.loading ? "Analyzing your explanation..." : "Evaluate Coverage"}
       </button>
 
       {state.error && !state.loading && (
@@ -208,7 +209,7 @@ export const CoverageDisplay: React.FC<{
       )}
 
       {state.evaluated && !state.loading && (
-        <button onClick={onEvaluated} className="btn-primary w-full mt-6">
+        <button onClick={() => onEvaluated({ covered: state.covered, score: state.coverageScore })} className="btn-primary w-full mt-6">
           Proceed to Clarity Check
         </button>
       )}

@@ -28,13 +28,13 @@ export async function generateMilestones(notes: string, apiKey: string): Promise
 
   if (!response.ok) {
     const errorData = await response.text()
-    throw new Error(`Gemini API error: ${response.status} - ${errorData}`)
+    throw new Error(`Analysis service error: ${response.status} - ${errorData}`)
   }
 
   const data = await response.json()
 
   if (!data.candidates || data.candidates.length === 0) {
-    throw new Error("No response from Gemini API")
+    throw new Error("We couldn't complete the analysis. Please try again.")
   }
 
   const text = data.candidates[0].content.parts[0].text
@@ -57,7 +57,7 @@ export async function generateMilestones(notes: string, apiKey: string): Promise
     return {
       success: false,
       milestones: [],
-      error: `Failed to parse response. Raw: ${text.substring(0, 200)}`,
+      error: "We couldn't interpret the analysis result. Please try again.",
       loading: false
     }
   }

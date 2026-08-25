@@ -165,7 +165,7 @@ export const MasteryLoop: React.FC<{
       <div className="flex items-center gap-3 mb-5">
         <div className="w-2 h-2 bg-brass rounded-sm" />
         <h2 className="font-serif text-xl font-semibold text-parchment">
-          Final Assessment
+          Assessment Result
         </h2>
       </div>
 
@@ -174,17 +174,13 @@ export const MasteryLoop: React.FC<{
       {transcript && (
         <details className="mt-5">
           <summary className="font-mono text-[10px] text-parchment-muted cursor-pointer hover:text-parchment transition-colors tracking-wider">
-            [VIEW TRANSCRIPT]
+            View transcript
           </summary>
           <p className="mt-2 font-mono text-xs text-parchment/60 whitespace-pre-wrap leading-relaxed">
             {transcript}
           </p>
         </details>
       )}
-
-      <button onClick={reset} className="btn-ghost w-full mt-5">
-        Start Over
-      </button>
     </div>
   )
 }
