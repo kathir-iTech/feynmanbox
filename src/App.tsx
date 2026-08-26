@@ -97,7 +97,19 @@ function HeaderBar({ onNewSession, onHistory, hasHistory }: { onNewSession: () =
   )
 }
 
-function HistoryPanel({ entries, onClose, onClear }: { entries: HistoryEntry[]; onClose: () => void; onClear: () => void }) {
+function HistoryPanel({
+  entries,
+  onClose,
+  onClear,
+  onExport,
+  onImport,
+}: {
+  entries: HistoryEntry[]
+  onClose: () => void
+  onClear: () => void
+  onExport?: () => void
+  onImport?: (file: File) => void
+}) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -200,56 +212,112 @@ function HistoryPanel({ entries, onClose, onClear }: { entries: HistoryEntry[]; 
                       {sorted
                         .slice()
                         .reverse()
-                        .map((entry) => (
-                          <div key={entry.id} className="p-4 rounded-panel border border-ink-border bg-ink">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="font-mono text-xs text-brass">{new Date(entry.date).toLocaleString()}</span>
-                              <span
-                                className={`font-mono text-xs font-bold ${entry.finalScore >= 80 ? "text-verified" : entry.isGaming ? "text-flagged" : "text-parchment-muted"}`}
-                              >
-                                {entry.finalScore}/100
-                              </span>
-                            </div>
-                            <div className="mb-2">
-                              <h3 className="label-tag text-[10px] mb-1">Milestones</h3>
-                              <ul className="space-y-1">
-                                {entry.milestones.map((m) => (
-                                  <li key={m.id} className="font-mono text-xs text-parchment-muted truncate">• {m.text}</li>
-                                ))}
-                              </ul>
-                            </div>
-                            {entry.details && entry.details.length > 0 && (
-                              <div className="mb-2">
-                                <h4 className="label-tag text-[10px] mb-1">Coverage Details</h4>
-                                <ul className="space-y-1">
-                                  {entry.details.slice(0, 3).map((d, i) => (
-                                    <li key={i} className="font-mono text-[10px] text-parchment-muted truncate">
-                                      {d.covered ? "✓" : "—"} {d.concept.slice(0, 60)}{d.concept.length > 60 ? "…" : ""}
-                                    </li>
-                                  ))}
-                                  {entry.details.length > 3 && (
-                                    <li className="font-mono text-[10px] text-parchment-muted">+{entry.details.length - 3} more</li>
+                        .map((entry) => {
+                          const isDue = entry.nextReviewDate ? new Date(entry.nextReviewDate).getTime() <= Date.now() : false
+                          const nextReviewLabel = entry.nextReviewDate
+                            ? `Next review: ${new Date(entry.nextReviewDate).toLocaleDateString()}${isDue ? " • Due for review" : ""}`
+                            : null
+                          return (
+                            <div key={entry.id} className="p-4 rounded-panel border border-ink-border bg-ink">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="font-mono text-xs text-brass">{new Date(entry.date).toLocaleString()}</span>
+                                <span
+                                  className={`font-mono text-xs font-bold ${entry.finalScore >= 80 ? "text-verified" : entry.isGaming ? "text-flagged" : "text-parchment-muted"}`}
+                                >
+                                  {entry.finalScore}/100
+                                </span>
+                              </div>
+                              {isDue && (
+                                <div className="mb-2 px-2 py-1 rounded bg-brass/20 border border-brass/30 text-brass font-mono text-[10px]">Due for review</div>
+                              )}
+                              {nextReviewLabel && <p className="font-mono text-[10px] text-parchment-muted mb-2">{nextReviewLabel}</p>}
+                              {(entry.subjectDomain || entry.confidence) && (
+                                <div className="flex gap-2 mb-2">
+                                  {entry.subjectDomain && (
+                                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-ink-border bg-ink-light text-parchment-muted">
+                                      {entry.subjectDomain === "narrative" ? "Narrative" : "Technical"}
+                                    </span>
                                   )}
+                                  {entry.confidence && (
+                                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-ink-border text-parchment-muted">
+                                      Confidence: {entry.confidence}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              <div className="mb-2">
+                                <h3 className="label-tag text-[10px] mb-1">Milestones</h3>
+                                <ul className="space-y-1">
+                                  {entry.milestones.map((m) => (
+                                    <li key={m.id} className="font-mono text-xs text-parchment-muted truncate">• {m.text}</li>
+                                  ))}
                                 </ul>
                               </div>
-                            )}
-                            <div className="flex gap-4 font-mono text-xs text-parchment-muted">
-                              <span>Coverage {entry.coverageScore}%</span>
-                              <span>
-                                Clarity {entry.isGaming ? 0 : entry.clarityScore}%{entry.isGaming ? " (flagged)" : ""}
-                              </span>
-                              <span className="text-parchment">Final {entry.finalScore}%</span>
+                              {entry.details && entry.details.length > 0 && (
+                                <div className="mb-2">
+                                  <h4 className="label-tag text-[10px] mb-1">Coverage Details</h4>
+                                  <ul className="space-y-1">
+                                    {entry.details.slice(0, 3).map((d: any, i) => (
+                                      <li key={i} className="font-mono text-[10px] text-parchment-muted truncate">
+                                        {d.covered ? "✓" : "—"} {d.concept.slice(0, 50)}
+                                        {d.concept.length > 50 ? "…" : ""}{" "}
+                                        {typeof d.sub_score === "number" ? (
+                                          <span className="text-brass">
+                                            {d.sub_score}/{d.max_score ?? 20}
+                                          </span>
+                                        ) : null}
+                                        {d.is_factually_correct === false ? <span className="text-flagged"> • factually wrong</span> : null}
+                                      </li>
+                                    ))}
+                                    {entry.details.length > 3 && (
+                                      <li className="font-mono text-[10px] text-parchment-muted">+{entry.details.length - 3} more</li>
+                                    )}
+                                  </ul>
+                                </div>
+                              )}
+                              {entry.acousticMetrics && (
+                                <p className="font-mono text-[10px] text-parchment-muted mb-2">
+                                  Speech: {entry.acousticMetrics.wordsPerMinute} WPM, {entry.acousticMetrics.pauseCount} pauses
+                                </p>
+                              )}
+                              <div className="flex gap-4 font-mono text-xs text-parchment-muted">
+                                <span>Coverage {entry.coverageScore}%</span>
+                                <span>
+                                  Clarity {entry.isGaming ? 0 : entry.clarityScore}%{entry.isGaming ? " (flagged)" : ""}
+                                </span>
+                                <span className="text-parchment">Final {entry.finalScore}%</span>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                     </div>
                   )
                 })
               })()}
             </div>
-            <button onClick={onClear} className="mt-4 btn-ghost w-full text-xs">
-              Clear History
-            </button>
+            <div className="mt-4 space-y-2">
+              <div className="flex gap-2">
+                <button onClick={onExport} className="btn-ghost flex-1 text-xs">
+                  Export History
+                </button>
+                <label className="btn-ghost flex-1 text-xs text-center cursor-pointer">
+                  Import History
+                  <input
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file && onImport) onImport(file)
+                      e.currentTarget.value = ""
+                    }}
+                  />
+                </label>
+              </div>
+              <button onClick={onClear} className="btn-ghost w-full text-xs">
+                Clear History
+              </button>
+            </div>
           </>
         )}
       </div>
@@ -617,6 +685,59 @@ export default function App() {
   const handleClearHistory = () => {
     setHistoryEntries([])
     persistHistory([])
+  }
+
+  const handleExportHistory = () => {
+    const data = JSON.stringify(historyEntries, null, 2)
+    const blob = new Blob([data], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `feynmanbox-history-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImportHistory = async (file: File) => {
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text)
+      if (!Array.isArray(parsed)) throw new Error("Invalid history file")
+      // De-duplicate by id
+      const existingIds = new Set(historyEntries.map((e) => e.id))
+      const toAdd = parsed.filter((e: any) => e && typeof e.id === "string" && !existingIds.has(e.id))
+      if (toAdd.length === 0) {
+        alert("No new entries to import — all entries already exist.")
+        return
+      }
+      // Basic validation and migration for old details
+      const migrated = toAdd.map((e: any) => {
+        if (e.details && Array.isArray(e.details)) {
+          e.details = e.details.map((d: any) => {
+            if (typeof d.sub_score !== "number") {
+              const max = 20
+              const covered = Boolean(d.covered)
+              return {
+                concept: d.concept,
+                covered,
+                feedback: d.feedback,
+                sub_score: covered ? max : 0,
+                max_score: max,
+                is_factually_correct: true,
+              }
+            }
+            return d
+          })
+        }
+        return e as HistoryEntry
+      })
+      const next = [...historyEntries, ...migrated]
+      setHistoryEntries(next)
+      persistHistory(next)
+      alert(`Imported ${migrated.length} entries.`)
+    } catch (err) {
+      alert(`Failed to import history: ${err instanceof Error ? err.message : "Invalid file"}`)
+    }
   }
 
   const finalScore = combinedResult ? Math.round(combinedResult.coverage_score * 0.6 + (combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score) * 0.4) : 0
@@ -1050,7 +1171,13 @@ export default function App() {
           )}
 
           {historyOpen && (
-            <HistoryPanel entries={historyEntries} onClose={() => setHistoryOpen(false)} onClear={handleClearHistory} />
+            <HistoryPanel
+              entries={historyEntries}
+              onClose={() => setHistoryOpen(false)}
+              onClear={handleClearHistory}
+              onExport={handleExportHistory}
+              onImport={handleImportHistory}
+            />
           )}
         </main>
       </div>
