@@ -23,7 +23,9 @@ const PURPOSE_MODELS: Record<Purpose, string> = {
 }
 const ALLOWED_PURPOSES = new Set<string>(Object.keys(PURPOSE_MODELS))
 
-const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024 // 2MB hard cap on incoming request body
+const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024 // 2MB cap for non-transcription request bodies
+const MAX_TRANSCRIPTION_PAYLOAD_BYTES = 4 * 1024 * 1024 // 4MB cap for audio transcription request bodies
+const MAX_ANY_PURPOSE_PAYLOAD_BYTES = Math.max(MAX_PAYLOAD_BYTES, MAX_TRANSCRIPTION_PAYLOAD_BYTES)
 
 function getClientIp(req: any): string {
   try {
@@ -139,18 +141,21 @@ export default async function handler(req: any, res: any) {
 
     // Read request body ONCE at the start and reuse for all retries (critical fix for body reuse bug)
     let body: any
+    let bodySize = 0
     try {
       const rawBody = req.body
-      const bodySize = rawBody
+      bodySize = rawBody
         ? typeof rawBody === "string"
           ? Buffer.byteLength(rawBody, "utf8")
           : Buffer.byteLength(JSON.stringify(rawBody), "utf8")
         : 0
       console.log(`[gemini] Incoming body type=${typeof rawBody} size=${bodySize} bytes`)
 
-      // 9.1: reject oversized bodies before doing any work / forwarding
-      if (bodySize > MAX_PAYLOAD_BYTES) {
-        console.warn(`[gemini] Rejected oversized body: ${bodySize} bytes (max ${MAX_PAYLOAD_BYTES})`)
+      // 9.1: reject oversized bodies before doing any work / forwarding.
+      // Purpose isn't parsed yet, so use the largest allowed cap here;
+      // the per-purpose cap is enforced right after purpose validation below.
+      if (bodySize > MAX_ANY_PURPOSE_PAYLOAD_BYTES) {
+        console.warn(`[gemini] Rejected oversized body: ${bodySize} bytes (max ${MAX_ANY_PURPOSE_PAYLOAD_BYTES})`)
         res.status(413).json({ error: "Request body too large." })
         return
       }
@@ -197,6 +202,13 @@ export default async function handler(req: any, res: any) {
     if (!purpose || !ALLOWED_PURPOSES.has(purpose)) {
       console.warn(`[gemini] Rejected unknown/invalid purpose: ${JSON.stringify(purpose)}`)
       res.status(400).json({ error: "Invalid or missing 'purpose'. Allowed purposes: " + Array.from(ALLOWED_PURPOSES).join(", ") })
+      return
+    }
+
+    const maxPayloadBytes = purpose === "transcription" ? MAX_TRANSCRIPTION_PAYLOAD_BYTES : MAX_PAYLOAD_BYTES
+    if (bodySize > maxPayloadBytes) {
+      console.warn(`[gemini] Rejected body for purpose=${purpose}: ${bodySize} bytes (max ${maxPayloadBytes})`)
+      res.status(413).json({ error: "Request body too large." })
       return
     }
 

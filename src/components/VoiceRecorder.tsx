@@ -325,7 +325,7 @@ export const VoiceRecorder: React.FC<{
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
-          sampleRate: 48000,
+          sampleRate: 16000,
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
@@ -371,7 +371,7 @@ export const VoiceRecorder: React.FC<{
         mimeType = "audio/mp4"
       }
 
-      const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 192000 } as MediaRecorderOptions)
+      const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32000 } as MediaRecorderOptions)
       mediaRecorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {
