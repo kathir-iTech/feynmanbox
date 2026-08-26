@@ -51,6 +51,23 @@ Valid subject_domain values: "technical" or "narrative". When has_teaching_conte
   })
 
   if (!response.ok) {
+    let serverDetails = ""
+    try {
+      const errJson = await response.clone().json()
+      serverDetails = errJson?.error || errJson?.details || JSON.stringify(errJson).slice(0, 300)
+      console.error("[milestoneService] /api/gemini failed", response.status, serverDetails)
+    } catch {
+      try {
+        serverDetails = (await response.clone().text()).slice(0, 300)
+        console.error("[milestoneService] /api/gemini failed", response.status, serverDetails)
+      } catch {}
+    }
+    if (response.status === 429) {
+      throw new Error("Too many requests — please wait a moment before trying again.")
+    }
+    if (response.status >= 500) {
+      throw new Error(`We couldn't complete the analysis (server ${response.status}). Please try again shortly.`)
+    }
     throw new Error("We couldn't complete the analysis. Please try again.")
   }
 

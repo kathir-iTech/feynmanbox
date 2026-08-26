@@ -32,6 +32,23 @@ export async function transcribeAudio(
   })
 
   if (!response.ok) {
+    let serverDetails = ""
+    try {
+      const errJson = await response.clone().json()
+      serverDetails = errJson?.error || errJson?.details || JSON.stringify(errJson).slice(0, 300)
+      console.error("[transcription] /api/gemini failed", response.status, serverDetails)
+    } catch {
+      try {
+        serverDetails = (await response.clone().text()).slice(0, 300)
+        console.error("[transcription] /api/gemini failed", response.status, serverDetails)
+      } catch {}
+    }
+    if (response.status === 429) {
+      throw new Error("Too many requests — please wait a moment before trying again.")
+    }
+    if (response.status >= 500) {
+      throw new Error(`We couldn't transcribe your audio (server ${response.status}). Please try again shortly.`)
+    }
     throw new Error("We couldn't transcribe your audio. Please try again.")
   }
 

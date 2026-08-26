@@ -343,6 +343,8 @@ export default function App() {
   const [fileName, setFileName] = useState<string | null>(null)
   const [documentStatus, setDocumentStatus] = useState<"idle" | "extracting" | "generating" | "ready" | "error">("idle")
   const [documentError, setDocumentError] = useState<string | null>(null)
+  // Multi-file upload (Bug 2): explicit user action to proceed
+  const [uploadedDocs, setUploadedDocs] = useState<Array<{ id: string; fileName: string; text: string; status: "extracting" | "ready" | "error"; error?: string }>>([])
   // Block 6: Back navigation — preserve data when going back
   const [isEditingTranscript, setIsEditingTranscript] = useState(false)
   // Generation / evaluation tokens to guard against stale async results
@@ -437,39 +439,56 @@ export default function App() {
   }
 
   const handleFileSelected = async (file: File) => {
-    // Immediate transition — don't block UI
-    setHasDocument(true)
-    setFileName(file.name)
-    setDocumentStatus("extracting")
+    const docId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    setUploadedDocs((prev) => [...prev, { id: docId, fileName: file.name, text: "", status: "extracting" }])
     setDocumentError(null)
-    setMilestones([])
-    const genId = milestoneGenIdRef.current + 1
-    milestoneGenIdRef.current = genId
-    // Background extraction - lazy load heavy libs
+    // Clear any prior milestone error when adding new file
+    if (documentStatus === "error") {
+      setDocumentStatus("idle")
+      setDocumentError(null)
+    }
     try {
       const { extractTextFromFile } = await import("./lib/fileExtractor")
-      const fileGenId = milestoneGenIdRef.current
       const text = await extractTextFromFile(file)
-      if (fileGenId !== milestoneGenIdRef.current) return
-      return processNotesToMilestones(text)
+      setUploadedDocs((prev) => prev.map((d) => (d.id === docId ? { ...d, text, status: "ready" as const } : d)))
     } catch (err: unknown) {
-      if (genId !== milestoneGenIdRef.current) return
       const msg = err instanceof Error ? err.message : "We couldn't read that file. Please try another file or paste your notes."
-      setDocumentStatus("error")
-      setDocumentError(msg)
+      setUploadedDocs((prev) => prev.map((d) => (d.id === docId ? { ...d, status: "error" as const, error: msg } : d)))
     }
   }
 
   const handlePasteText = (text: string) => {
+    const docId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const trimmed = text.trim()
+    if (!trimmed) {
+      setDocumentError("Pasted text is empty.")
+      return
+    }
+    setUploadedDocs((prev) => [...prev, { id: docId, fileName: "Pasted notes", text: trimmed, status: "ready" as const }])
+    setDocumentError(null)
+    if (documentStatus === "error") {
+      setDocumentStatus("idle")
+      setDocumentError(null)
+    }
+  }
+
+  const handleRemoveDoc = (id: string) => {
+    setUploadedDocs((prev) => prev.filter((d) => d.id !== id))
+  }
+
+  const handleContinueToRecording = async () => {
+    const readyDocs = uploadedDocs.filter((d) => d.status === "ready" && d.text.trim())
+    if (readyDocs.length === 0) {
+      setDocumentError("Please add at least one document with readable text before continuing.")
+      return
+    }
+    const combined = readyDocs.map((d) => `--- ${d.fileName} ---\n${d.text.trim()}`).join("\n\n")
     setHasDocument(true)
-    setFileName("Pasted notes")
-    setDocumentStatus("extracting")
+    setFileName(readyDocs.length === 1 ? readyDocs[0].fileName : `${readyDocs.length} documents`)
     setDocumentError(null)
     setMilestones([])
-    // microtask to allow UI transition before heavy processing
-    setTimeout(() => {
-      processNotesToMilestones(text)
-    }, 50)
+    // Trigger milestone generation from combined text
+    return processNotesToMilestones(combined)
   }
 
   const runCombinedEvaluation = async (currentTranscript: string, currentMilestones: Milestone[]) => {
@@ -613,6 +632,7 @@ export default function App() {
     setSubjectDomain(null)
     setAcousticMetrics(null)
     setEvalCooldown(false)
+    setUploadedDocs([])
   }
 
   const handleBackToUpload = () => {
@@ -790,7 +810,72 @@ export default function App() {
               <p className="font-mono text-xs text-parchment-muted text-center leading-relaxed max-w-xl mx-auto -mt-2">
                 Catches the illusion of competence — when reciting keywords feels like understanding, but isn&apos;t.
               </p>
-              <DocumentUpload onFileSelected={handleFileSelected} onPasteText={handlePasteText} error={documentError} status={documentStatus} />
+              {uploadedDocs.length > 0 && (
+                <div className="panel p-4 space-y-3">
+                  <h3 className="label-tag mb-3">Processed Documents ({uploadedDocs.length})</h3>
+                  <div className="space-y-2">
+                    {uploadedDocs.map((doc) => (
+                      <div key={doc.id} className="flex items-center gap-3 p-3 rounded-panel border border-ink-border bg-ink">
+                        {doc.status === "ready" ? (
+                          <div className="w-2 h-2 bg-verified rounded-sm flex-shrink-0" />
+                        ) : doc.status === "error" ? (
+                          <div className="w-2 h-2 bg-flagged rounded-sm flex-shrink-0" />
+                        ) : (
+                          <div className="w-2 h-2 bg-brass rounded-full animate-pulse flex-shrink-0" />
+                        )}
+                        <span className="font-mono text-xs text-parchment flex-1 truncate" title={doc.fileName}>
+                          {doc.fileName}
+                        </span>
+                        <span className="font-mono text-[10px] text-parchment-muted flex-shrink-0">
+                          {doc.status === "ready" ? "ready" : doc.status === "error" ? "error" : "extracting..."}
+                        </span>
+                        <button
+                          onClick={() => handleRemoveDoc(doc.id)}
+                          aria-label={`Remove ${doc.fileName}`}
+                          className="text-parchment-muted hover:text-flagged transition-colors flex-shrink-0"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {uploadedDocs.some((d) => d.status === "error" && d.error) && (
+                    <div className="space-y-1">
+                      {uploadedDocs
+                        .filter((d) => d.status === "error" && d.error)
+                        .map((d) => (
+                          <p key={d.id} className="font-mono text-[10px] text-flagged">
+                            {d.fileName}: {d.error}
+                          </p>
+                        ))}
+                    </div>
+                  )}
+                  <p className="font-mono text-[10px] text-parchment-muted">
+                    {uploadedDocs.filter((d) => d.status === "ready").length} ready
+                    {uploadedDocs.filter((d) => d.status === "extracting").length > 0
+                      ? `, ${uploadedDocs.filter((d) => d.status === "extracting").length} extracting`
+                      : ""}
+                    {uploadedDocs.filter((d) => d.status === "error").length > 0
+                      ? `, ${uploadedDocs.filter((d) => d.status === "error").length} failed`
+                      : ""}
+                  </p>
+                </div>
+              )}
+              <DocumentUpload onFileSelected={handleFileSelected} onPasteText={handlePasteText} error={documentError} status="idle" />
+              {uploadedDocs.filter((d) => d.status === "ready").length > 0 && (
+                <button onClick={handleContinueToRecording} className="btn-primary w-full">
+                  Continue to Recording — {uploadedDocs.filter((d) => d.status === "ready").length} document
+                  {uploadedDocs.filter((d) => d.status === "ready").length > 1 ? "s" : ""} ready
+                </button>
+              )}
+              {uploadedDocs.length > 0 && uploadedDocs.filter((d) => d.status === "ready").length === 0 && uploadedDocs.every((d) => d.status !== "extracting") && (
+                <p className="font-mono text-xs text-parchment-muted text-center">Add a document with readable text to continue.</p>
+              )}
+              {documentStatus === "error" && documentError && (
+                <div className="p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">{documentError}</div>
+              )}
             </>
           )}
 

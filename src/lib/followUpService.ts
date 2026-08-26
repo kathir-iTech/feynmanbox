@@ -22,6 +22,12 @@ export async function generateFollowUpQuestion(
   })
 
   if (!response.ok) {
+    let serverDetails = ""
+    try {
+      const errJson = await response.clone().json()
+      serverDetails = errJson?.error || JSON.stringify(errJson).slice(0, 300)
+      console.error("[followUp] /api/gemini failed", response.status, serverDetails)
+    } catch {}
     throw new Error("Failed to generate follow-up question")
   }
 
