@@ -1,4 +1,4 @@
-import type { MilestoneState } from "../types"
+import type { MilestoneState, SubjectDomain } from "../types"
 import { parseGeminiJson } from "./parseGeminiJson"
 
 export async function generateMilestones(notes: string): Promise<MilestoneState> {
@@ -7,7 +7,7 @@ export async function generateMilestones(notes: string): Promise<MilestoneState>
       {
         parts: [
           {
-            text: `You are a teaching-content quality guard and concept extractor.
+            text: `You are a teaching-content quality guard, subject classifier, and concept extractor.
 
 STEP 1 — ASSESSMENT: First evaluate: "Does this text contain genuine explanatory or conceptual teaching content (e.g., definitions, explanations, processes, principles) as opposed to metadata, a table of contents, a product description, a schedule, or a list of topic names without explanation?"
 
@@ -19,15 +19,20 @@ Be lenient: genuine lecture notes, textbook excerpts, explanatory paragraphs, or
 - marketing copy with no teaching content
 If the text contains at least some genuine explanation of ideas (even a single paragraph explaining how something works), treat it as has_teaching_content: true and proceed to extract milestones normally.
 
+STEP 1b — SUBJECT CLASSIFICATION: Also classify the material's domain type:
+- "technical" for STEM/technical content (science, math, engineering, computer science, logic-heavy material that requires explicit causal/logical connectors like "because", "therefore", "consequently")
+- "narrative" for humanities/narrative content (history, literature, philosophy, social sciences, storytelling, thematic analysis that values coherent narrative and thematic connection over strict causal language)
+Base this strictly on the uploaded content's nature, not the student's explanation. If uncertain or mixed, choose the dominant type. This classification will adjust how clarity is evaluated later.
+
 Given these notes: ${notes}
 
 STEP 2 — EXTRACTION: If has_teaching_content is true, extract 5 to 7 key learning concepts a student must be able to explain to prove mastery. Each concept should be a concise but substantive milestone (1 sentence). If has_teaching_content is false, return an empty milestones array and a brief reason (e.g., "a book description with chapter titles and price but no explanations", "a weekly schedule listing topics without explaining them").
 
 Output ONLY valid JSON (no markdown, no code fences) in this exact format:
-{"has_teaching_content": true, "reason": "", "milestones": ["concept 1", "concept 2", "concept 3", "concept 4", "concept 5"]}
+{"has_teaching_content": true, "reason": "", "subject_domain": "technical", "milestones": ["concept 1", "concept 2", "concept 3", "concept 4", "concept 5"]}
 For the false case:
-{"has_teaching_content": false, "reason": "brief explanation of why this is not teaching content", "milestones": []}
-When has_teaching_content is true, provide 5-7 milestones depending on content density. When false, provide [] for milestones.`,
+{"has_teaching_content": false, "reason": "brief explanation of why this is not teaching content", "subject_domain": "technical", "milestones": []}
+Valid subject_domain values: "technical" or "narrative". When has_teaching_content is true, provide 5-7 milestones depending on content density. When false, provide [] for milestones.`,
           },
         ],
       },
@@ -58,7 +63,16 @@ When has_teaching_content is true, provide 5-7 milestones depending on content d
   const text = data.candidates[0].content.parts[0].text
 
   try {
-    const parsed = parseGeminiJson<{ has_teaching_content?: boolean; reason?: string; milestones?: string[] }>(text)
+    const parsed = parseGeminiJson<{ has_teaching_content?: boolean; reason?: string; milestones?: string[]; subject_domain?: string }>(text)
+
+    // Normalize subject_domain
+    const rawDomain = typeof parsed.subject_domain === "string" ? parsed.subject_domain.trim().toLowerCase() : ""
+    let subjectDomain: SubjectDomain = "technical"
+    if (rawDomain === "narrative" || rawDomain === "humanities" || rawDomain === "narrative/humanities") {
+      subjectDomain = "narrative"
+    } else if (rawDomain === "technical" || rawDomain === "stem" || rawDomain === "technical/stem") {
+      subjectDomain = "technical"
+    }
 
     // Lightweight content-quality guard: if Gemini flags non-teaching material, surface a specific error
     if (parsed.has_teaching_content === false) {
@@ -69,7 +83,8 @@ When has_teaching_content is true, provide 5-7 milestones depending on content d
         success: false,
         milestones: [],
         error: `This looks like ${snippet} rather than material that explains concepts. Try uploading lecture notes, a textbook excerpt, or content that actually explains ideas, not just names them.`,
-        loading: false
+        loading: false,
+        subjectDomain
       }
     }
 
@@ -83,14 +98,16 @@ When has_teaching_content is true, provide 5-7 milestones depending on content d
           success: false,
           milestones: [],
           error: `This looks like ${snippet} rather than material that explains concepts. Try uploading lecture notes, a textbook excerpt, or content that actually explains ideas, not just names them.`,
-          loading: false
+          loading: false,
+          subjectDomain
         }
       }
       return {
         success: false,
         milestones: [],
         error: "We couldn't extract any key concepts from those notes. Please try a different document or add more detail.",
-        loading: false
+        loading: false,
+        subjectDomain
       }
     }
 
@@ -102,7 +119,8 @@ When has_teaching_content is true, provide 5-7 milestones depending on content d
         covered: false
       })),
       error: null,
-      loading: false
+      loading: false,
+      subjectDomain
     }
   } catch {
     return {

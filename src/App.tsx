@@ -2,7 +2,7 @@ import "./index.css"
 import { DocumentUpload } from "./components/DocumentUpload"
 import { VoiceRecorder } from "./components/VoiceRecorder"
 import { ExportFeature } from "./components/ExportFeature"
-import type { Milestone, CoverageDetail } from "./types"
+import type { Milestone, CoverageDetail, SubjectDomain, AcousticMetrics } from "./types"
 import { useState, useEffect, useRef } from "react"
 import { generateMilestones } from "./lib/milestoneService"
 import { evaluateCombined, type CombinedEvaluationResult } from "./lib/combinedEvaluationService"
@@ -19,6 +19,10 @@ interface HistoryEntry {
   isGaming: boolean
   fingerprint: string
   details: CoverageDetail[]
+  confidence?: "high" | "moderate" | "low"
+  subjectDomain?: SubjectDomain
+  acousticMetrics?: AcousticMetrics
+  nextReviewDate?: string
 }
 
 function simpleHash(str: string): string {
@@ -262,6 +266,9 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
   const [hasSaved, setHasSaved] = useState(false)
+  const [subjectDomain, setSubjectDomain] = useState<SubjectDomain | null>(null)
+  const [acousticMetrics, setAcousticMetrics] = useState<AcousticMetrics | null>(null)
+  const [evalCooldown, setEvalCooldown] = useState(false)
 
   // Block 1: Document upload + background processing
   const [hasDocument, setHasDocument] = useState(false)
@@ -287,7 +294,30 @@ export default function App() {
       const raw = localStorage.getItem("feynmanbox_history")
       if (raw) {
         const parsed = JSON.parse(raw) as HistoryEntry[]
-        if (Array.isArray(parsed)) setHistoryEntries(parsed)
+        if (Array.isArray(parsed)) {
+          // Migrate legacy details without sub_score/max_score/is_factually_correct
+          const migrated = parsed.map((entry) => {
+            if (entry.details && Array.isArray(entry.details)) {
+              entry.details = entry.details.map((d: any) => {
+                if (typeof d.sub_score !== "number") {
+                  const max = 20
+                  const covered = Boolean(d.covered)
+                  return {
+                    concept: d.concept,
+                    covered,
+                    feedback: d.feedback,
+                    sub_score: covered ? max : 0,
+                    max_score: max,
+                    is_factually_correct: true,
+                  } as CoverageDetail
+                }
+                return d
+              })
+            }
+            return entry
+          })
+          setHistoryEntries(migrated)
+        }
       }
     } catch {
       // ignore
@@ -318,14 +348,17 @@ export default function App() {
           setDocumentStatus("error")
           setDocumentError("We couldn't extract any key concepts from those notes. Please try a different document or add more detail.")
           setMilestones([])
+          setSubjectDomain(result.subjectDomain ?? null)
           return
         }
         setMilestones(result.milestones)
+        setSubjectDomain(result.subjectDomain ?? null)
         setDocumentStatus("ready")
         setDocumentError(null)
       } else {
         setDocumentStatus("error")
         setDocumentError(result.error || "We couldn't prepare your milestones. Please try again.")
+        setSubjectDomain(result.subjectDomain ?? null)
       }
     } catch (err: unknown) {
       if (genId !== milestoneGenIdRef.current) return
@@ -374,16 +407,23 @@ export default function App() {
   const runCombinedEvaluation = async (currentTranscript: string, currentMilestones: Milestone[]) => {
     if (!currentTranscript.trim() || currentMilestones.length === 0) return
     if (evalInFlightRef.current) return
+    if (evalCooldown) return
     evalInFlightRef.current = true
     const evalId = ++evalGenIdRef.current
     setIsEvaluating(true)
     setEvaluationError(null)
     setCombinedResult(null)
     try {
-      const result = await evaluateCombined(currentMilestones, currentTranscript)
+      const result = await evaluateCombined(currentMilestones, currentTranscript, {
+        subjectDomain: subjectDomain ?? undefined,
+        acousticMetrics: acousticMetrics ?? undefined,
+      })
       if (evalId !== evalGenIdRef.current) return
       setCombinedResult(result)
       setEvaluationError(null)
+      // Client-side cooldown (Phase 6.1)
+      setEvalCooldown(true)
+      setTimeout(() => setEvalCooldown(false), 4000)
     } catch (err: unknown) {
       if (evalId !== evalGenIdRef.current) return
       const msg = err instanceof Error ? err.message : "We couldn't complete the analysis. Please try again."
@@ -418,6 +458,16 @@ export default function App() {
     if (combinedResult && !hasSaved && milestones.length > 0) {
       const finalScore = Math.round(combinedResult.coverage_score * 0.6 + (combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score) * 0.4)
       const fingerprint = computeFingerprint(milestones)
+      // Spaced repetition (Phase 7.2): base interval on score, extend on repeated success
+      const priorSameFp = historyEntries.filter((e) => e.fingerprint === fingerprint)
+      const priorSuccessCount = priorSameFp.filter((e) => e.finalScore >= 80).length
+      let baseDays = 1
+      if (finalScore >= 80) baseDays = 7
+      else if (finalScore >= 50) baseDays = 2
+      // Each prior success on same fingerprint extends interval (Ebbinghaus-inspired)
+      const intervalDays = baseDays * Math.pow(1.5, priorSuccessCount)
+      const nextReview = new Date()
+      nextReview.setDate(nextReview.getDate() + Math.round(intervalDays))
       const entry: HistoryEntry = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
@@ -429,13 +479,17 @@ export default function App() {
         isGaming: combinedResult.is_gaming_attempt,
         fingerprint,
         details: combinedResult.details,
+        confidence: combinedResult.confidence,
+        subjectDomain: combinedResult.subject_domain ?? subjectDomain ?? undefined,
+        acousticMetrics: combinedResult.acousticMetrics ?? acousticMetrics ?? undefined,
+        nextReviewDate: nextReview.toISOString(),
       }
       const next = [...historyEntries, entry]
       setHistoryEntries(next)
       persistHistory(next)
       setHasSaved(true)
     }
-  }, [combinedResult, milestones, transcript, hasSaved, historyEntries])
+  }, [combinedResult, milestones, transcript, hasSaved, historyEntries, subjectDomain, acousticMetrics])
 
   // Phase 3.2: Socratic follow-up question — auto-fetch when results ready
   useEffect(() => {
@@ -488,6 +542,9 @@ export default function App() {
     setFollowUpAnswer("")
     setFollowUpSkipped(false)
     setFollowUpError(null)
+    setSubjectDomain(null)
+    setAcousticMetrics(null)
+    setEvalCooldown(false)
   }
 
   const handleBackToUpload = () => {
@@ -522,11 +579,12 @@ export default function App() {
     setFollowUpError(null)
   }
 
-  const handleTranscriptReady = (newTranscript: string) => {
+  const handleTranscriptReady = (newTranscript: string, metrics?: AcousticMetrics) => {
     evalGenIdRef.current += 1
     followUpGenIdRef.current += 1
     evalInFlightRef.current = false
     setTranscript(newTranscript)
+    if (metrics) setAcousticMetrics(metrics)
     setIsEditingTranscript(false)
     setCombinedResult(null)
     setIsEvaluating(false)
@@ -679,20 +737,48 @@ export default function App() {
                   {combinedResult.is_gaming_attempt ? "Review Needed" : isMastered ? "Mastery Achieved" : "Assessment Complete"}
                 </h2>
               </div>
-              <h3 className="label-tag mb-4">Combined Evaluation</h3>
+              <h3 className="label-tag mb-2">Combined Evaluation</h3>
+              {/* Subject-aware label */}
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[10px] px-2 py-1 rounded border border-brass/30 bg-brass/10 text-brass">
+                  Evaluating as: {combinedResult.subject_domain === "narrative" ? "Narrative content" : "Technical content"}
+                </span>
+                <span className="font-mono text-[10px] text-parchment-muted">
+                  {combinedResult.subject_domain === "narrative" ? "• thematic coherence" : "• causal logic"}
+                </span>
+                <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${combinedResult.confidence === "high" ? "bg-verified/20 text-verified" : combinedResult.confidence === "low" ? "bg-flagged/20 text-flagged" : "bg-ink-border text-parchment-muted"}`}>
+                  Confidence: {combinedResult.confidence}
+                </span>
+              </div>
 
               {/* Overall score */}
-              <div className="flex items-baseline gap-3 mb-2">
+              <div className="flex items-baseline gap-3 mb-1">
                 <span className="label-tag">Final Score</span>
                 <span className="score-display">{finalScore}</span>
                 <span className="label-tag">/100</span>
               </div>
-              <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-4">
+              <p className="font-mono text-[10px] text-parchment-muted mb-2">
+                Coverage {combinedResult.coverage_score}/100 + Clarity {combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score}/100 → Final {finalScore} (60% coverage, 40% clarity)
+              </p>
+              <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-3">
                 <div
                   className={`h-full transition-all duration-1000 ease-out ${isMastered ? "bg-verified" : combinedResult.is_gaming_attempt ? "bg-flagged" : "bg-brass"}`}
                   style={{ width: `${finalScore}%` }}
                 />
               </div>
+              {/* Coverage breakdown traceability */}
+              <p className="font-mono text-[10px] text-parchment-muted mb-4">
+                Coverage {combinedResult.coverage_score}/100 = sum of {combinedResult.details.map((d) => `${d.sub_score}/${d.max_score}`).join(" + ")} — inspectable per-concept below
+              </p>
+
+              {/* Low confidence informational note */}
+              {combinedResult.confidence === "low" && (
+                <div className="p-3 rounded-panel border border-brass/30 bg-brass/5 mb-4">
+                  <p className="font-mono text-xs text-brass leading-relaxed">
+                    Evaluation confidence: Low — this explanation was brief or ambiguous; consider re-recording with more detail for a more reliable assessment.
+                  </p>
+                </div>
+              )}
 
               {/* FIX 4: Brief overall summary */}
               <div className="p-4 rounded-panel border border-brass/20 bg-brass/5 mb-6">
@@ -709,7 +795,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* What you understood well */}
+              {/* Per-concept granular sub-scores — what you understood well */}
               {combinedResult.details.filter((d) => d.covered).length > 0 && (
                 <div className="mb-6">
                   <div className="flex items-center gap-2 mb-3">
@@ -729,8 +815,12 @@ export default function App() {
                               </svg>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="font-serif text-sm text-parchment leading-snug">{detail.concept}</p>
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="font-serif text-sm text-parchment leading-snug flex-1">{detail.concept}</p>
+                                <span className="font-mono text-xs font-bold text-verified flex-shrink-0">{detail.sub_score}/{detail.max_score}</span>
+                              </div>
                               <p className="font-mono text-xs text-verified mt-1.5 leading-relaxed">{detail.feedback}</p>
+                              {!detail.is_factually_correct && <p className="font-mono text-[10px] text-flagged mt-1">⚠ Flagged as factually incorrect — see feedback above</p>}
                             </div>
                           </div>
                         </div>
@@ -739,7 +829,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* What you missed */}
+              {/* What you missed — with sub-scores */}
               {combinedResult.details.filter((d) => !d.covered).length > 0 && (
                 <div className="mb-6">
                   <div className="flex items-center gap-2 mb-3">
@@ -757,8 +847,12 @@ export default function App() {
                               <span className="font-mono text-[8px] text-parchment-muted">—</span>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="font-serif text-sm text-parchment leading-snug">{detail.concept}</p>
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="font-serif text-sm text-parchment leading-snug flex-1">{detail.concept}</p>
+                                <span className={`font-mono text-xs font-bold flex-shrink-0 ${!detail.is_factually_correct ? "text-flagged" : "text-parchment-muted"}`}>{detail.sub_score}/{detail.max_score}</span>
+                              </div>
                               <p className="font-mono text-xs text-parchment-muted mt-1.5 leading-relaxed">{detail.feedback}</p>
+                              {!detail.is_factually_correct && <p className="font-mono text-[10px] text-flagged mt-1">Factually incorrect — {detail.feedback}</p>}
                             </div>
                           </div>
                         </div>
@@ -767,18 +861,65 @@ export default function App() {
                 </div>
               )}
 
-              {/* Clarity feedback when not flagged */}
+              {/* Full per-concept breakdown table for traceability */}
+              <div className="mb-6 p-3 rounded-panel border border-ink-border bg-ink">
+                <h3 className="label-tag text-[10px] mb-2">Per-Concept Breakdown (traceable)</h3>
+                <div className="space-y-1.5">
+                  {combinedResult.details.map((d, i) => (
+                    <div key={`breakdown-${i}`} className="flex items-center justify-between gap-2 font-mono text-xs">
+                      <span className="text-parchment-muted truncate flex-1">Concept {i + 1} — {d.concept.slice(0, 40)}{d.concept.length > 40 ? "…" : ""}</span>
+                      <span className={`flex-shrink-0 font-bold ${d.sub_score >= d.max_score * 0.7 ? "text-verified" : d.sub_score === 0 ? "text-flagged" : "text-brass"}`}>{d.sub_score}/{d.max_score}</span>
+                      <span className={`w-2 h-2 rounded-sm flex-shrink-0 ${d.is_factually_correct ? "bg-verified/50" : "bg-flagged"}`} title={d.is_factually_correct ? "factually correct" : "factually incorrect"} />
+                    </div>
+                  ))}
+                  <div className="pt-2 mt-2 border-t border-ink-border flex items-center justify-between font-mono text-xs font-bold">
+                    <span className="text-parchment">Total Coverage</span>
+                    <span className="text-parchment">{combinedResult.coverage_score}/100</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clarity feedback when not flagged — subject-aware */}
               {!combinedResult.is_gaming_attempt && combinedResult.reasoning && (
                 <div className="p-4 rounded-panel border border-ink-border bg-ink mb-6">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-2 h-2 bg-brass rounded-sm" />
-                    <h3 className="label-tag text-[10px]">Clarity & Coherence</h3>
+                    <h3 className="label-tag text-[10px]">Clarity & Coherence {combinedResult.subject_domain === "narrative" ? "(thematic)" : "(causal)"}</h3>
                     <span className="font-mono text-xs text-parchment ml-auto">{combinedResult.clarity_score}/100</span>
                   </div>
                   <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-3">
                     <div className="h-full bg-brass transition-all duration-1000 ease-out" style={{ width: `${combinedResult.clarity_score}%` }} />
                   </div>
                   <p className="font-mono text-xs text-parchment-muted leading-relaxed">{combinedResult.reasoning}</p>
+                </div>
+              )}
+
+              {/* Speech Analysis — acoustic/prosody supplementary signals (Phase 5) */}
+              {combinedResult.acousticMetrics && (
+                <div className="p-4 rounded-panel border border-ink-border bg-ink mb-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 bg-brass rounded-sm" />
+                    <h3 className="label-tag text-[10px]">Speech Analysis</h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 font-mono text-xs">
+                    <div>
+                      <span className="text-parchment-muted">Pace:</span> <span className="text-parchment">{combinedResult.acousticMetrics.wordsPerMinute} WPM</span>
+                      <span className="text-parchment-muted ml-1">
+                        {combinedResult.acousticMetrics.wordsPerMinute > 180 ? "• unusually fast" : combinedResult.acousticMetrics.wordsPerMinute < 100 ? "• slow" : "• natural"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-parchment-muted">Pauses:</span> <span className="text-parchment">{combinedResult.acousticMetrics.pauseCount} pauses</span>
+                      <span className="text-parchment-muted ml-1">• {(combinedResult.acousticMetrics.totalPauseDuration / 1000).toFixed(1)}s total</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-parchment-muted">Pitch variance:</span> <span className="text-parchment">{combinedResult.acousticMetrics.pitchVarianceScore.toFixed(1)}/100</span>
+                      <span className="text-parchment-muted ml-1">{combinedResult.acousticMetrics.pitchVarianceScore < 20 ? "• flat, may indicate reading" : combinedResult.acousticMetrics.pitchVarianceScore > 60 ? "• expressive" : "• moderate"}</span>
+                    </div>
+                    <div className="col-span-2 font-mono text-[10px] text-parchment-muted leading-relaxed">
+                      {combinedResult.acousticMetrics.wordsPerMinute > 180 && combinedResult.acousticMetrics.pauseCount < 2 ? "Very fast speech with minimal pauses on a complex topic may indicate memorized recitation rather than genuine understanding." : combinedResult.acousticMetrics.pauseCount >= 2 && combinedResult.acousticMetrics.wordsPerMinute >= 120 && combinedResult.acousticMetrics.wordsPerMinute <= 160 ? "Natural pacing with brief pauses for thought is consistent with genuine explanation." : "Acoustic signals are supplementary — text analysis remains primary."}
+                    </div>
+                  </div>
                 </div>
               )}
 
