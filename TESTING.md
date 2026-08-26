@@ -131,3 +131,26 @@ Metrics logged to console `[AcousticMetrics]` and displayed in â€œSpeech Analysi
 ## Worker Parsing Verification
 
 - Large PDF (10MB) parsed via `fileParser.worker.ts` (Vite `new Worker(new URL(...))`) without blocking UI (main thread remains responsive, waveform animates). Verified by profiling: main thread idle during worker parse, vs previous synchronous parse causing jank.
+
+---
+
+## Demo Mode (Phase 11.1 — offline resilience)
+
+Add \?demo=true\ to the URL (e.g. \http://localhost:5173/?demo=true\) to run the entire flow with no network or API dependency. The app detects the flag via \isDemoMode()\ and returns pre-recorded fixtures (BST milestones, transcript, evaluation, follow-up) for milestone generation, transcription, evaluation, and follow-up. A small banner confirms demo mode is active.
+
+Verified: load \?demo=true\, walk through upload ? milestone review ? record ? transcript review ? results. All screens populate from fixtures, zero network calls.
+
+## Immutable Transcript & Prompt-Injection (Phase 8)
+
+- Original spoken transcript is stored immutably; the editable textarea is labeled \"Correct transcription errors (optional)\". Evaluation uses the EDITED version for minor fixes (\u2264 15% word-diff) and the ORIGINAL for significant rewrites (> 15%), with a transparent note + diff toggle.
+- All untrusted content (document text, transcript) is wrapped in \<UNTRUSTED_STUDY_MATERIAL>\ / \<UNTRUSTED_STUDENT_TRANSCRIPT>\ tags with a system directive forbidding instruction interpretation.
+
+Verification scripts (live Gemini, require GEMINI_API_KEY in .env.local):
+- \
+ode scripts/testInjection.mjs\ \u2014 confirms an injection-laden empty transcript scores 0 (not inflated).
+- \
+ode scripts/testDiffThreshold.mjs\ \u2014 confirms minor edits (\u2248 0.03 ratio) are NOT flagged while large rewrites (0.97) ARE flagged.
+
+## API Hardening (Phase 9)
+
+\/api/gemini\ now accepts only \{ purpose, payload }\ with an allowlist (milestone_generation, transcription, combined_evaluation, followup_question), maps each purpose to a fixed server-side model, validates payload shape, enforces a 2MB body cap, and logs only metadata (no student content). History import validates each entry's schema and reports skipped/invalid counts.

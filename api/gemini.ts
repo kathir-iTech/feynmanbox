@@ -1,22 +1,33 @@
 /**
  * Vercel serverless function: proxies Gemini API requests.
- * Client sends { model?: string, payload: GeminiRequestPayload }.
- * Server injects API key from GEMINI_API_KEY env (never exposed to client).
+ * Client sends { purpose: Purpose, payload: GeminiRequestPayload }.
+ * The server maps each known PURPOSE to a fixed model (the client can NEVER
+ * choose an arbitrary model or arbitrary endpoint) and validates the payload
+ * shape before forwarding. API key comes from GEMINI_API_KEY env (never exposed).
  */
 // Vercel Node.js runtime handler (works with @vercel/node)
 
 // ---- Rate limiting: in-memory sliding window ----
-// Note: in-memory rate limiting resets on each serverless cold start (a known limitation without an external
-// store like Redis) — but this still provides meaningful protection against rapid automated abuse within a single
-// warm instance, which is the realistic threat model for this deployment.
 const RATE_WINDOW_MS = 10 * 60 * 1000 // 10 minutes
 const RATE_MAX_REQUESTS = 20
 const rateLimitStore = new Map<string, number[]>()
 
+// ---- Purpose allowlist: maps a known client purpose to a FIXED model ----
+// The client cannot request an arbitrary model — only these purposes are accepted.
+type Purpose = "milestone_generation" | "transcription" | "combined_evaluation" | "followup_question"
+const PURPOSE_MODELS: Record<Purpose, string> = {
+  milestone_generation: "gemini-flash-lite-latest",
+  transcription: "gemini-flash-lite-latest",
+  combined_evaluation: "gemini-flash-lite-latest",
+  followup_question: "gemini-flash-lite-latest",
+}
+const ALLOWED_PURPOSES = new Set<string>(Object.keys(PURPOSE_MODELS))
+
+const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024 // 2MB hard cap on incoming request body
+
 function getClientIp(req: any): string {
   try {
     const headers = req.headers || {}
-    // x-forwarded-for can be string | string[] | undefined
     const xffRaw = headers["x-forwarded-for"] ?? headers["X-Forwarded-For"]
     if (xffRaw) {
       const xff = Array.isArray(xffRaw) ? xffRaw[0] : (xffRaw as string)
@@ -34,7 +45,6 @@ function getClientIp(req: any): string {
       return req.socket.remoteAddress
     }
     if (typeof req.ip === "string" && req.ip) return req.ip
-    // Fallback for Vercel edge: try x-vercel-forwarded-for
     const vercelFwd = headers["x-vercel-forwarded-for"] ?? headers["x-vercel-forwarded-for"]
     if (vercelFwd) {
       const v = Array.isArray(vercelFwd) ? vercelFwd[0] : (vercelFwd as string)
@@ -50,9 +60,7 @@ function getClientIp(req: any): string {
 function isRateLimited(ip: string): boolean {
   const now = Date.now()
   const timestamps = rateLimitStore.get(ip) ?? []
-  // Filter to window — keep only recent requests
   const recent = timestamps.filter((t) => now - t < RATE_WINDOW_MS)
-  // Correct sliding window check: allow up to RATE_MAX_REQUESTS, reject on 21st
   if (recent.length >= RATE_MAX_REQUESTS) {
     rateLimitStore.set(ip, recent)
     return true
@@ -73,6 +81,36 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+/**
+ * Validates the Gemini request payload shape at runtime.
+ * We do NOT trust the client to send a well-formed payload.
+ */
+function validatePayload(payload: any): { ok: boolean; error?: string } {
+  if (!payload || typeof payload !== "object") {
+    return { ok: false, error: "payload must be an object" }
+  }
+  if (!Array.isArray(payload.contents) || payload.contents.length === 0) {
+    return { ok: false, error: "payload.contents must be a non-empty array" }
+  }
+  for (let i = 0; i < payload.contents.length; i++) {
+    const part = payload.contents[i]
+    if (!part || typeof part !== "object") return { ok: false, error: `contents[${i}] must be an object` }
+    if (!Array.isArray(part.parts) || part.parts.length === 0) {
+      return { ok: false, error: `contents[${i}].parts must be a non-empty array` }
+    }
+    for (let j = 0; j < part.parts.length; j++) {
+      const p = part.parts[j]
+      if (!p || typeof p !== "object") return { ok: false, error: `contents[${i}].parts[${j}] must be an object` }
+      const hasText = typeof p.text === "string" && p.text.length > 0
+      const hasInline = typeof p.inline_data === "object" && p.inline_data !== null
+      if (!hasText && !hasInline) {
+        return { ok: false, error: `contents[${i}].parts[${j}] must contain text or inline_data` }
+      }
+    }
+  }
+  return { ok: true }
+}
+
 export default async function handler(req: any, res: any) {
   const startTime = Date.now()
   let requestBodyForRetry: string | null = null
@@ -86,10 +124,10 @@ export default async function handler(req: any, res: any) {
       return
     }
 
-    // Rate limiting check — logged
+    // Rate limiting check
     const clientIp = getClientIp(req)
     const rateLimited = isRateLimited(clientIp)
-    console.log(`[gemini] Rate check ip=${clientIp} limited=${rateLimited} storeSize=${rateLimitStore.size}`)
+    console.log(`[gemini] Rate check ip=${clientIp} limited=${rateLimited}`)
     if (rateLimited) {
       console.warn(`[gemini] Rate limit exceeded for ip=${clientIp}`)
       res.status(429).json({
@@ -100,7 +138,6 @@ export default async function handler(req: any, res: any) {
     }
 
     // Read request body ONCE at the start and reuse for all retries (critical fix for body reuse bug)
-    // Node.js/Vercel request bodies can only be read once — never re-read from stream on retry
     let body: any
     try {
       const rawBody = req.body
@@ -111,13 +148,19 @@ export default async function handler(req: any, res: any) {
         : 0
       console.log(`[gemini] Incoming body type=${typeof rawBody} size=${bodySize} bytes`)
 
+      // 9.1: reject oversized bodies before doing any work / forwarding
+      if (bodySize > MAX_PAYLOAD_BYTES) {
+        console.warn(`[gemini] Rejected oversized body: ${bodySize} bytes (max ${MAX_PAYLOAD_BYTES})`)
+        res.status(413).json({ error: "Request body too large." })
+        return
+      }
+
       if (typeof rawBody === "string") {
         body = JSON.parse(rawBody)
         requestBodyForRetry = rawBody
         parsedBodyForRetry = body
       } else if (rawBody && typeof rawBody === "object") {
         body = rawBody
-        // Serialize once for logging and for potential retry reuse
         try {
           requestBodyForRetry = JSON.stringify(rawBody)
           parsedBodyForRetry = body
@@ -127,8 +170,6 @@ export default async function handler(req: any, res: any) {
           parsedBodyForRetry = body
         }
       } else if (rawBody === undefined || rawBody === null) {
-        // Try to handle case where body is a stream or not yet parsed (edge runtime)
-        // Attempt to read as text if req has text method
         if (typeof req.text === "function") {
           const text = await req.text()
           console.log(`[gemini] Read body via req.text() size=${text.length}`)
@@ -144,52 +185,62 @@ export default async function handler(req: any, res: any) {
         parsedBodyForRetry = body
       }
     } catch (e) {
-      console.error("[gemini] Invalid JSON body", e, (e as Error)?.stack)
-      res.status(400).json({ error: "Invalid JSON body", details: (e as Error)?.message })
+      console.error("[gemini] Invalid JSON body", e)
+      res.status(400).json({ error: "Invalid JSON body" })
       return
     }
 
-    // Use parsedBodyForRetry for all subsequent logic — never re-read from req
     const effectiveBody = parsedBodyForRetry ?? body
 
-    const model: string =
-      typeof effectiveBody?.model === "string" && effectiveBody.model.trim()
-        ? effectiveBody.model.trim()
-        : "gemini-flash-lite-latest"
+    // 9.1: strict purpose allowlist — reject any unknown purpose with 400
+    const purpose: string = typeof effectiveBody?.purpose === "string" ? effectiveBody.purpose.trim() : ""
+    if (!purpose || !ALLOWED_PURPOSES.has(purpose)) {
+      console.warn(`[gemini] Rejected unknown/invalid purpose: ${JSON.stringify(purpose)}`)
+      res.status(400).json({ error: "Invalid or missing 'purpose'. Allowed purposes: " + Array.from(ALLOWED_PURPOSES).join(", ") })
+      return
+    }
+
     const payload = effectiveBody?.payload
     if (!payload || typeof payload !== "object") {
-      console.warn("[gemini] Missing payload", { bodyKeys: effectiveBody ? Object.keys(effectiveBody) : null })
+      console.warn("[gemini] Missing payload")
       res.status(400).json({ error: "Missing payload" })
       return
     }
 
-    // Log outgoing request (sanitized)
-    const payloadStr = JSON.stringify(payload)
-    console.log(`[gemini] Outgoing to Gemini model=${model} payloadSize=${Buffer.byteLength(payloadStr, "utf8")} bytes`)
+    // 9.1: runtime schema validation of payload shape
+    const validation = validatePayload(payload)
+    if (!validation.ok) {
+      console.warn(`[gemini] Invalid payload shape: ${validation.error}`)
+      res.status(400).json({ error: "Invalid payload shape: " + validation.error })
+      return
+    }
 
-    // API key handling — startup diagnostic (masked) for Vercel verification
+    // 9.1: map purpose -> fixed model server-side (client cannot override the model)
+    const model = PURPOSE_MODELS[purpose as Purpose]
+    const payloadStr = JSON.stringify(payload)
+    console.log(`[gemini] Purpose=${purpose} -> model=${model} payloadSize=${Buffer.byteLength(payloadStr, "utf8")} bytes`)
+
+    // API key handling — startup diagnostic (masked)
     const rawKey = process.env.GEMINI_API_KEY
     if (rawKey) {
       const masked = `${rawKey.slice(0, 4)}...${rawKey.slice(-4)} (length ${rawKey.length})`
       console.log(`[gemini] Diagnostic: GEMINI_API_KEY present — ${masked}`)
-      // Safety: warn if key looks truncated or placeholder
       if (rawKey.length < 20) {
         console.warn(`[gemini] WARNING: GEMINI_API_KEY length ${rawKey.length} is unusually short — may be truncated or invalid.`)
       }
       if (rawKey === "your_gemini_api_key_here" || rawKey.includes("your_gemini")) {
         console.warn(`[gemini] WARNING: GEMINI_API_KEY appears to be a placeholder — set a real key from Google AI Studio.`)
       }
-      // Note: Valid keys may start with AIza (legacy) or AQ. (new format) — both are OK, length varies (39-60)
     } else {
       console.error("[gemini] Diagnostic: GEMINI_API_KEY is MISSING at runtime — check Vercel Dashboard → Project Settings → Environment Variables (Production)")
       if (process.env.VITE_GEMINI_API_KEY) {
-        console.error("[gemini] Found VITE_GEMINI_API_KEY but IGNORED — server must use GEMINI_API_KEY (non-VITE_) only. VITE_ vars are client-exposed and stale fallback is disabled.")
+        console.error("[gemini] Found VITE_GEMINI_API_KEY but IGNORED — server must use GEMINI_API_KEY (non-VITE_) only.")
       }
     }
 
     const apiKey = rawKey
     if (!apiKey) {
-      console.error("[gemini] Missing GEMINI_API_KEY — server cannot call Gemini. Set it in Vercel Dashboard → Settings → Environment Variables for Production, then redeploy.")
+      console.error("[gemini] Missing GEMINI_API_KEY — server cannot call Gemini.")
       res.status(500).json({ error: "Server misconfigured: missing GEMINI_API_KEY. Please set a valid server-side GEMINI_API_KEY in Vercel and redeploy." })
       return
     }
@@ -197,20 +248,17 @@ export default async function handler(req: any, res: any) {
 
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
 
-    // Retry logic: up to 2 retries (3 total attempts) with exponential backoff 1s then 3s
-    // FIX: Reuse parsedBodyForRetry/payloadStr for every attempt — never re-read request stream
-    // Increase timeout to 30s for large prompts (multi-thousand-word docs)
+    // Retry logic: up to 2 retries (3 total attempts) with exponential backoff
     const maxRetries = 2
     const backoffs = [1000, 3000]
     const TIMEOUT_MS = 30000
     let lastError: unknown = null
     let lastStatus: number | null = null
-    // Reuse the same serialized payload for all retries to avoid body consumption issues
     const serializedPayload = payloadStr
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const attemptStart = Date.now()
-      console.log(`[gemini] Attempt ${attempt + 1}/${maxRetries + 1} to ${apiUrl.replace(/key=.*/, "key=***")}`)
+      console.log(`[gemini] Attempt ${attempt + 1}/${maxRetries + 1} (purpose=${purpose})`)
 
       let controller: AbortController | null = null
       let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -233,18 +281,17 @@ export default async function handler(req: any, res: any) {
 
         console.log(`[gemini] Upstream response status=${upstream.status} attempt=${attempt + 1} duration=${Date.now() - attemptStart}ms`)
 
-        // If retryable 5xx and retries remain, log and retry
         if (upstream.status >= 500 && upstream.status <= 599 && attempt < maxRetries) {
           lastStatus = upstream.status
-          const rawBody = await upstream.text().catch(() => "<failed to read body>")
-          console.warn(`[gemini] Retryable 5xx status=${upstream.status} body=${rawBody.slice(0, 500)} attempt=${attempt + 1} — backing off ${backoffs[attempt]}ms`)
+          const rawBodyText = await upstream.text().catch(() => "<failed to read body>")
+          console.warn(`[gemini] Retryable 5xx status=${upstream.status} attempt=${attempt + 1} — backing off ${backoffs[attempt]}ms`)
           await sleep(backoffs[attempt] ?? 3000)
           continue
         }
 
-        // For all other statuses (2xx, 4xx, final 5xx after retries), return to client
         const text = await upstream.text()
-        console.log(`[gemini] Upstream body size=${text.length} status=${upstream.status} preview=${text.slice(0, 300)}`)
+        // 9.2: log ONLY status + size metadata, never response content
+        console.log(`[gemini] Upstream done status=${upstream.status} responseBytes=${text.length}`)
 
         res.status(upstream.status)
         try {
@@ -259,11 +306,8 @@ export default async function handler(req: any, res: any) {
         if (timeoutId) clearTimeout(timeoutId)
         lastError = err
         const isAbort = err instanceof Error && err.name === "AbortError"
-        console.error(`[gemini] Fetch error on attempt ${attempt + 1}:`, err, (err as Error)?.stack)
+        console.error(`[gemini] Fetch error on attempt ${attempt + 1}:`, err?.constructor?.name ?? "unknown")
 
-        // Distinguish retryable vs non-retryable
-        // Retryable: network errors, timeouts (AbortError), fetch failures
-        // Non-retryable: programming errors (should not retry)
         const isRetryable = isAbort || (err instanceof Error && (err.message.includes("fetch") || err.message.includes("network") || err.message.includes("aborted")))
 
         if (attempt < maxRetries && isRetryable) {
@@ -272,37 +316,30 @@ export default async function handler(req: any, res: any) {
           continue
         }
 
-        // If not retryable or exhausted retries, surface error
         const msg = err instanceof Error ? err.message : "Upstream request failed"
-        const stack = err instanceof Error ? err.stack : String(err)
-        console.error(`[gemini] Final failure after ${attempt + 1} attempts in ${Date.now() - startTime}ms: ${msg}\n${stack}`)
+        console.error(`[gemini] Final failure after ${attempt + 1} attempts in ${Date.now() - startTime}ms`)
 
         if (isAbort) {
-          res.status(504).json({ error: "Service temporarily unavailable — request timed out, please try again shortly.", details: msg })
+          res.status(504).json({ error: "Service temporarily unavailable — request timed out, please try again shortly." })
         } else {
-          res.status(502).json({ error: `Service temporarily unavailable, please try again shortly. (${msg})`, details: stack?.slice(0, 1000) })
+          res.status(502).json({ error: `Service temporarily unavailable, please try again shortly.` })
         }
         return
       }
     }
 
-    // Exhausted retries for 5xx
     if (lastStatus !== null && lastStatus >= 500) {
       console.error(`[gemini] All retries exhausted for 5xx status=${lastStatus}`)
       res.status(503).json({ error: "Service temporarily unavailable, please try again shortly.", status: lastStatus })
       return
     }
-    const msg = lastError instanceof Error ? lastError.message : "Upstream request failed"
-    console.error(`[gemini] All retries exhausted, last error: ${msg}`)
-    res.status(502).json({ error: `Service temporarily unavailable, please try again shortly. (${msg})` })
+    console.error(`[gemini] All retries exhausted`)
+    res.status(502).json({ error: `Service temporarily unavailable, please try again shortly.` })
   } catch (outerErr: unknown) {
-    // Top-level catch — ensures no silent 500 without logging
-    console.error("[gemini] UNHANDLED handler error:", outerErr, (outerErr as Error)?.stack)
+    console.error("[gemini] UNHANDLED handler error")
     if (!res.headersSent) {
       res.status(500).json({
         error: "Internal server error in Gemini proxy",
-        details: outerErr instanceof Error ? outerErr.message : String(outerErr),
-        stack: outerErr instanceof Error ? outerErr.stack?.slice(0, 2000) : undefined,
       })
     }
   }

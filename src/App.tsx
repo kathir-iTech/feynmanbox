@@ -6,7 +6,8 @@ import type { Milestone, CoverageDetail, SubjectDomain, AcousticMetrics } from "
 import { useState, useEffect, useRef } from "react"
 import { generateMilestones } from "./lib/milestoneService"
 import { evaluateCombined, type CombinedEvaluationResult } from "./lib/combinedEvaluationService"
-import { generateFollowUpQuestion } from "./lib/followUpService"
+import { generateFollowUpPair, checkFollowUpAnswer, type FollowUpPair, type FollowUpCheck } from "./lib/followUpService"
+import { isDemoMode } from "./lib/security"
 
 interface HistoryEntry {
   id: string
@@ -15,7 +16,10 @@ interface HistoryEntry {
   coverageScore: number
   clarityScore: number
   finalScore: number
+  factualAccuracyScore?: number
+  reasoningQualityScore?: number
   transcript: string
+  originalTranscript?: string
   isGaming: boolean
   fingerprint: string
   details: CoverageDetail[]
@@ -39,6 +43,34 @@ function computeFingerprint(milestones: Milestone[]): string {
   const joined = milestones.map((m) => m.text).join("|")
   return simpleHash(joined)
 }
+
+/** Word-level edit-distance ratio between two strings (0 = identical, ~1 = completely different). */
+function computeWordDiffRatio(a: string, b: string): number {
+  const tokenize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+  const aw = tokenize(a)
+  const bw = tokenize(b)
+  const maxLen = Math.max(aw.length, bw.length, 1)
+  // Levenshtein on word arrays (substitution cost 1)
+  const dp: number[] = Array.from({ length: bw.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= aw.length; i++) {
+    let prev = dp[0]
+    dp[0] = i
+    for (let j = 1; j <= bw.length; j++) {
+      const temp = dp[j]
+      const cost = aw[i - 1] === bw[j - 1] ? 0 : 1
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost)
+      prev = temp
+    }
+  }
+  return dp[bw.length] / maxLen
+}
+
+const SIGNIFICANT_EDIT_THRESHOLD = 0.15
 
 function Sparkline({ scores }: { scores: number[] }) {
   if (scores.length < 2) return null
@@ -65,6 +97,18 @@ function Sparkline({ scores }: { scores: number[] }) {
         return <circle key={idx} cx={x} cy={y} r="2.5" fill="#C9962C" />
       })}
     </svg>
+  )
+}
+
+function DimBar({ label, score, color }: { label: string; score: number; color: string }) {
+  return (
+    <div className="flex items-center gap-3 mb-2 last:mb-0">
+      <span className="font-mono text-[10px] text-parchment-muted w-40 flex-shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-ink-border rounded-sm overflow-hidden">
+        <div className={`h-full transition-all duration-1000 ease-out ${color}`} style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
+      </div>
+      <span className="font-mono text-xs font-bold text-parchment w-10 text-right flex-shrink-0">{Math.round(score)}</span>
+    </div>
   )
 }
 
@@ -352,12 +396,32 @@ export default function App() {
   const evalGenIdRef = useRef(0)
   const evalInFlightRef = useRef(false)
   // Phase 3: Follow-up Socratic probe
-  const [followUpQuestion, setFollowUpQuestion] = useState<string | null>(null)
   const [followUpLoading, setFollowUpLoading] = useState(false)
   const [followUpAnswer, setFollowUpAnswer] = useState("")
   const [followUpSkipped, setFollowUpSkipped] = useState(false)
   const [followUpError, setFollowUpError] = useState<string | null>(null)
   const followUpGenIdRef = useRef(0)
+
+  // Phase 8.1: immutable original transcript vs editable transcript
+  const [originalTranscript, setOriginalTranscript] = useState<string>("")
+  const [transcriptCommitted, setTranscriptCommitted] = useState(false)
+  const [transcriptSignificantlyEdited, setTranscriptSignificantlyEdited] = useState(false)
+  const [showDiffView, setShowDiffView] = useState(false)
+
+  // Phase 11.2: review/edit milestones before recording
+  const [milestonesConfirmed, setMilestonesConfirmed] = useState(false)
+
+  // Phase 10.3 / 10.4: transfer question + answer check
+  const [followUpPair, setFollowUpPair] = useState<FollowUpPair | null>(null)
+  const [followUpCheck, setFollowUpCheck] = useState<FollowUpCheck | null>(null)
+  const [followUpChecking, setFollowUpChecking] = useState(false)
+
+  // Phase 11.3: content-guard override in-flight
+  const [overrideLoading, setOverrideLoading] = useState(false)
+  const [contentGuardCanOverride, setContentGuardCanOverride] = useState(false)
+
+  // Demo mode banner
+  const demoMode = isDemoMode()
 
   useEffect(() => {
     try {
@@ -417,6 +481,7 @@ export default function App() {
         if (!result.milestones || result.milestones.length === 0) {
           setDocumentStatus("error")
           setDocumentError("We couldn't extract any key concepts from those notes. Please try a different document or add more detail.")
+          setContentGuardCanOverride(false)
           setMilestones([])
           setSubjectDomain(result.subjectDomain ?? null)
           return
@@ -425,9 +490,12 @@ export default function App() {
         setSubjectDomain(result.subjectDomain ?? null)
         setDocumentStatus("ready")
         setDocumentError(null)
+        setMilestonesConfirmed(false)
+        setContentGuardCanOverride(false)
       } else {
         setDocumentStatus("error")
         setDocumentError(result.error || "We couldn't prepare your milestones. Please try again.")
+        setContentGuardCanOverride(Boolean(result.canOverride))
         setSubjectDomain(result.subjectDomain ?? null)
       }
     } catch (err: unknown) {
@@ -487,11 +555,51 @@ export default function App() {
     setFileName(readyDocs.length === 1 ? readyDocs[0].fileName : `${readyDocs.length} documents`)
     setDocumentError(null)
     setMilestones([])
+    setMilestonesConfirmed(false)
     // Trigger milestone generation from combined text
     return processNotesToMilestones(combined)
   }
 
-  const runCombinedEvaluation = async (currentTranscript: string, currentMilestones: Milestone[]) => {
+  // Phase 11.3: override the content-quality guard and extract milestones anyway
+  const handleOverrideContentGuard = async () => {
+    const readyDocs = uploadedDocs.filter((d) => d.status === "ready" && d.text.trim())
+    if (readyDocs.length === 0) return
+    const combined = readyDocs.map((d) => `--- ${d.fileName} ---\n${d.text.trim()}`).join("\n\n")
+    const genId = ++milestoneGenIdRef.current
+    setOverrideLoading(true)
+    setDocumentStatus("generating")
+    setDocumentError(null)
+    try {
+      const result = await generateMilestones(combined, { override: true })
+      if (genId !== milestoneGenIdRef.current) return
+      if (result.success) {
+        setMilestones(result.milestones)
+        setSubjectDomain(result.subjectDomain ?? null)
+        setDocumentStatus("ready")
+        setMilestonesConfirmed(false)
+      } else {
+        setDocumentStatus("error")
+        setDocumentError(result.error || "We couldn't extract concepts from that material.")
+      }
+    } catch (err: unknown) {
+      if (genId !== milestoneGenIdRef.current) return
+      setDocumentStatus("error")
+      setDocumentError(err instanceof Error ? err.message : "We couldn't complete the request.")
+    } finally {
+      if (genId === milestoneGenIdRef.current) setOverrideLoading(false)
+    }
+  }
+
+  // Phase 8.1: choose which transcript to evaluate. Minor edits (typo/mishear fixes, <= threshold)
+  // transparently improve accuracy, so we evaluate the EDITED version. Significant rewrites (> threshold)
+  // are evaluated against the ORIGINAL spoken transcript, with a transparent flag shown to the user.
+  const getEvaluationTranscript = (): string => {
+    if (transcriptSignificantlyEdited) return originalTranscript
+    return transcript
+  }
+
+  const runCombinedEvaluation = async (currentMilestones: Milestone[]) => {
+    const currentTranscript = getEvaluationTranscript()
     if (!currentTranscript.trim() || currentMilestones.length === 0) return
     if (evalInFlightRef.current) return
     if (evalCooldown) return
@@ -524,11 +632,12 @@ export default function App() {
     }
   }
 
-  // FIX 3: Auto-run combined evaluation when transcript + milestones ready (single click flow)
+  // FIX 3: Auto-run combined evaluation when transcript committed + milestones ready
   useEffect(() => {
     if (
       hasDocument &&
       transcript &&
+      transcriptCommitted &&
       !isEditingTranscript &&
       milestones.length > 0 &&
       documentStatus === "ready" &&
@@ -536,14 +645,14 @@ export default function App() {
       !isEvaluating &&
       !evaluationError
     ) {
-      runCombinedEvaluation(transcript, milestones)
+      runCombinedEvaluation(milestones)
     }
-  }, [hasDocument, transcript, milestones, isEditingTranscript, documentStatus, combinedResult, isEvaluating, evaluationError])
+  }, [hasDocument, transcript, transcriptCommitted, isEditingTranscript, milestones, documentStatus, combinedResult, isEvaluating, evaluationError])
 
   // Save to history when combined result present and not yet saved
   useEffect(() => {
     if (combinedResult && !hasSaved && milestones.length > 0) {
-      const finalScore = Math.round(combinedResult.coverage_score * 0.6 + (combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score) * 0.4)
+      const finalScore = computeFinalScore(combinedResult)
       const fingerprint = computeFingerprint(milestones)
       // Spaced repetition (Phase 7.2): base interval on score, extend on repeated success
       const priorSameFp = historyEntries.filter((e) => e.fingerprint === fingerprint)
@@ -562,7 +671,10 @@ export default function App() {
         coverageScore: combinedResult.coverage_score,
         clarityScore: combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score,
         finalScore,
+        factualAccuracyScore: combinedResult.factual_accuracy_score,
+        reasoningQualityScore: combinedResult.is_gaming_attempt ? 0 : combinedResult.reasoning_quality_score,
         transcript: transcript,
+        originalTranscript: originalTranscript,
         isGaming: combinedResult.is_gaming_attempt,
         fingerprint,
         details: combinedResult.details,
@@ -578,25 +690,27 @@ export default function App() {
     }
   }, [combinedResult, milestones, transcript, hasSaved, historyEntries, subjectDomain, acousticMetrics])
 
-  // Phase 3.2: Socratic follow-up question — auto-fetch when results ready
+  // Phase 10.3: generate remediation (gap) + transfer (application) follow-up pair
   useEffect(() => {
     if (!combinedResult || !transcript || milestones.length === 0) return
     const missed = combinedResult.details.find((d) => !d.covered)
     if (!missed) {
-      setFollowUpQuestion(null)
+      setFollowUpPair(null)
       setFollowUpLoading(false)
       return
     }
+    const covered = combinedResult.details.find((d) => d.covered) ?? null
     const genId = ++followUpGenIdRef.current
     setFollowUpLoading(true)
-    setFollowUpQuestion(null)
+    setFollowUpPair(null)
     setFollowUpError(null)
     setFollowUpSkipped(false)
     setFollowUpAnswer("")
-    generateFollowUpQuestion(missed.concept, transcript)
-      .then((q) => {
+    setFollowUpCheck(null)
+    generateFollowUpPair(missed.concept, covered ? covered.concept : null, getEvaluationTranscript())
+      .then((pair) => {
         if (genId !== followUpGenIdRef.current) return
-        setFollowUpQuestion(q)
+        setFollowUpPair(pair)
         setFollowUpLoading(false)
       })
       .catch(() => {
@@ -605,7 +719,27 @@ export default function App() {
         setFollowUpLoading(false)
         // Fail silently — follow-up is optional
       })
-  }, [combinedResult, transcript, milestones])
+  }, [combinedResult, transcript, milestones, transcriptSignificantlyEdited])
+
+  // Phase 10.4: lightweight "Check my answer" micro-check against the missed concept
+  const handleCheckFollowUpAnswer = async () => {
+    if (!followUpPair || !followUpAnswer.trim()) return
+    const missed = combinedResult?.details.find((d) => !d.covered)
+    if (!missed) return
+    const genId = followUpGenIdRef.current
+    setFollowUpChecking(true)
+    setFollowUpCheck(null)
+    try {
+      const result = await checkFollowUpAnswer(missed.concept, followUpAnswer)
+      if (genId !== followUpGenIdRef.current) return
+      setFollowUpCheck(result)
+    } catch {
+      if (genId !== followUpGenIdRef.current) return
+      setFollowUpCheck({ covered: false, feedback: "Could not verify the answer right now." })
+    } finally {
+      if (genId === followUpGenIdRef.current) setFollowUpChecking(false)
+    }
+  }
 
   const handleReset = () => {
     milestoneGenIdRef.current += 1
@@ -614,6 +748,12 @@ export default function App() {
     evalInFlightRef.current = false
     setMilestones([])
     setTranscript("")
+    setOriginalTranscript("")
+    setTranscriptCommitted(false)
+    setTranscriptSignificantlyEdited(false)
+
+    setShowDiffView(false)
+    setMilestonesConfirmed(false)
     setCombinedResult(null)
     setIsEvaluating(false)
     setEvaluationError(null)
@@ -624,11 +764,14 @@ export default function App() {
     setDocumentStatus("idle")
     setDocumentError(null)
     setIsEditingTranscript(false)
-    setFollowUpQuestion(null)
+
     setFollowUpLoading(false)
     setFollowUpAnswer("")
     setFollowUpSkipped(false)
     setFollowUpError(null)
+    setFollowUpPair(null)
+    setFollowUpCheck(null)
+    setOverrideLoading(false)
     setSubjectDomain(null)
     setAcousticMetrics(null)
     setEvalCooldown(false)
@@ -642,14 +785,24 @@ export default function App() {
     setHasDocument(false)
     setIsEditingTranscript(false)
     setTranscript("")
+    setOriginalTranscript("")
+    setTranscriptCommitted(false)
+    setTranscriptSignificantlyEdited(false)
+
+    setShowDiffView(false)
+    setMilestonesConfirmed(false)
+    setDocumentStatus("idle")
+    setDocumentError(null)
     setCombinedResult(null)
     setIsEvaluating(false)
     setEvaluationError(null)
-    setFollowUpQuestion(null)
+
     setFollowUpLoading(false)
     setFollowUpAnswer("")
     setFollowUpSkipped(false)
     setFollowUpError(null)
+    setFollowUpPair(null)
+    setFollowUpCheck(null)
   }
 
   const handleBackToTranscript = () => {
@@ -660,29 +813,42 @@ export default function App() {
     setIsEvaluating(false)
     setEvaluationError(null)
     setIsEditingTranscript(true)
-    setFollowUpQuestion(null)
+    setTranscriptCommitted(false)
+    setTranscriptSignificantlyEdited(false)
+    setShowDiffView(false)
+
     setFollowUpLoading(false)
     setFollowUpAnswer("")
     setFollowUpSkipped(false)
     setFollowUpError(null)
+    setFollowUpPair(null)
+    setFollowUpCheck(null)
   }
 
   const handleTranscriptReady = (newTranscript: string, metrics?: AcousticMetrics) => {
     evalGenIdRef.current += 1
     followUpGenIdRef.current += 1
     evalInFlightRef.current = false
+    // Phase 8.1: store the ORIGINAL (spoken) transcript immutably; the editable copy starts identical.
+    setOriginalTranscript(newTranscript)
     setTranscript(newTranscript)
+    setTranscriptCommitted(false)
+    setTranscriptSignificantlyEdited(false)
+
+    setShowDiffView(false)
     if (metrics) setAcousticMetrics(metrics)
     setIsEditingTranscript(false)
     setCombinedResult(null)
     setIsEvaluating(false)
     setEvaluationError(null)
     setHasSaved(false)
-    setFollowUpQuestion(null)
+
     setFollowUpLoading(false)
     setFollowUpAnswer("")
     setFollowUpSkipped(false)
     setFollowUpError(null)
+    setFollowUpPair(null)
+    setFollowUpCheck(null)
   }
 
   const handleRetryEvaluation = () => {
@@ -691,14 +857,14 @@ export default function App() {
     evalInFlightRef.current = false
     setEvaluationError(null)
     setCombinedResult(null)
-    setFollowUpQuestion(null)
+
     setFollowUpLoading(false)
     setFollowUpAnswer("")
     setFollowUpSkipped(false)
     setFollowUpError(null)
     if (transcript && milestones.length > 0) {
       // delay to allow state to settle before re-evaluating
-      setTimeout(() => runCombinedEvaluation(transcript, milestones), 0)
+      setTimeout(() => runCombinedEvaluation(milestones), 0)
     }
   }
 
@@ -718,49 +884,84 @@ export default function App() {
     URL.revokeObjectURL(url)
   }
 
+  // Phase 9.3: validate a single imported history entry's structure/types before merging.
+  const isValidHistoryEntry = (e: any): boolean => {
+    if (!e || typeof e !== "object") return false
+    if (typeof e.id !== "string") return false
+    if (typeof e.date !== "string") return false
+    if (typeof e.finalScore !== "number" || Number.isNaN(e.finalScore)) return false
+    if (typeof e.coverageScore !== "number") return false
+    if (typeof e.clarityScore !== "number") return false
+    if (typeof e.isGaming !== "boolean") return false
+    if (!Array.isArray(e.milestones)) return false
+    if (typeof e.fingerprint !== "string") return false
+    return true
+  }
+
   const handleImportHistory = async (file: File) => {
     try {
       const text = await file.text()
       const parsed = JSON.parse(text)
-      if (!Array.isArray(parsed)) throw new Error("Invalid history file")
-      // De-duplicate by id
+      if (!Array.isArray(parsed)) throw new Error("Invalid history file — expected an array")
       const existingIds = new Set(historyEntries.map((e) => e.id))
-      const toAdd = parsed.filter((e: any) => e && typeof e.id === "string" && !existingIds.has(e.id))
-      if (toAdd.length === 0) {
-        alert("No new entries to import — all entries already exist.")
+      let imported = 0
+      let skipped = 0
+      const migrated: HistoryEntry[] = []
+      for (const e of parsed) {
+        if (!isValidHistoryEntry(e)) {
+          skipped += 1
+          continue
+        }
+        if (existingIds.has(e.id)) {
+          skipped += 1
+          continue
+        }
+        // Migrate legacy details lacking sub_score (per-concept max defaults to 20)
+        let details = Array.isArray(e.details) ? e.details : []
+        details = details.map((d: any) => {
+          if (typeof d.sub_score !== "number") {
+            const max = 20
+            const covered = Boolean(d.covered)
+            return {
+              concept: d.concept,
+              covered,
+              feedback: d.feedback,
+              sub_score: covered ? max : 0,
+              max_score: max,
+              is_factually_correct: true,
+            }
+          }
+          return d as CoverageDetail
+        })
+        migrated.push({
+          ...(e as HistoryEntry),
+          details,
+          factualAccuracyScore: typeof e.factualAccuracyScore === "number" ? e.factualAccuracyScore : undefined,
+          reasoningQualityScore: typeof e.reasoningQualityScore === "number" ? e.reasoningQualityScore : undefined,
+          originalTranscript: typeof e.originalTranscript === "string" ? e.originalTranscript : undefined,
+        })
+        imported += 1
+      }
+      if (imported === 0) {
+        alert(`No new entries imported. Skipped ${skipped} invalid or duplicate entries.`)
         return
       }
-      // Basic validation and migration for old details
-      const migrated = toAdd.map((e: any) => {
-        if (e.details && Array.isArray(e.details)) {
-          e.details = e.details.map((d: any) => {
-            if (typeof d.sub_score !== "number") {
-              const max = 20
-              const covered = Boolean(d.covered)
-              return {
-                concept: d.concept,
-                covered,
-                feedback: d.feedback,
-                sub_score: covered ? max : 0,
-                max_score: max,
-                is_factually_correct: true,
-              }
-            }
-            return d
-          })
-        }
-        return e as HistoryEntry
-      })
       const next = [...historyEntries, ...migrated]
       setHistoryEntries(next)
       persistHistory(next)
-      alert(`Imported ${migrated.length} entries.`)
+      alert(`Imported ${imported} entr${imported === 1 ? "y" : "ies"}, skipped ${skipped} invalid or duplicate.`)
     } catch (err) {
       alert(`Failed to import history: ${err instanceof Error ? err.message : "Invalid file"}`)
     }
   }
 
-  const finalScore = combinedResult ? Math.round(combinedResult.coverage_score * 0.6 + (combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score) * 0.4) : 0
+  const computeFinalScore = (r: CombinedEvaluationResult): number => {
+    const effClarity = r.is_gaming_attempt ? 0 : r.clarity_score
+    const effReasoning = r.is_gaming_attempt ? 0 : r.reasoning_quality_score
+    return Math.round(r.coverage_score * 0.4 + r.factual_accuracy_score * 0.2 + effReasoning * 0.2 + effClarity * 0.2)
+  }
+
+  const finalScore = combinedResult ? computeFinalScore(combinedResult) : 0
   const isMastered = combinedResult !== null && finalScore >= 80 && !combinedResult.is_gaming_attempt
   const hasHistory = historyEntries.length > 0
 
@@ -775,6 +976,12 @@ export default function App() {
             It doesn't test what you remember. It tests if you can explain it.
           </p>
           <p className="mt-1 label-tag text-[10px]">Oral examination — bluff detection</p>
+          {demoMode && (
+            <div className="mt-3 inline-flex items-center gap-2 px-2 py-1 rounded-panel border border-brass/40 bg-brass/10">
+              <span className="w-2 h-2 bg-brass rounded-full animate-pulse" />
+              <span className="font-mono text-[10px] text-brass">Demo mode — offline fixtures, no network</span>
+            </div>
+          )}
         </header>
 
         <main className="space-y-6">
@@ -800,6 +1007,15 @@ export default function App() {
               {documentStatus === "error" && (
                 <button onClick={handleReset} className="ml-auto font-mono text-xs text-brass hover:text-brass-light flex-shrink-0">
                   Try again
+                </button>
+              )}
+              {documentStatus === "error" && contentGuardCanOverride && (
+                <button
+                  onClick={handleOverrideContentGuard}
+                  disabled={overrideLoading}
+                  className="ml-auto font-mono text-xs text-ink bg-brass hover:bg-brass-light rounded-panel px-3 py-1 flex-shrink-0 disabled:opacity-50"
+                >
+                  {overrideLoading ? "Working..." : "Continue anyway"}
                 </button>
               )}
             </div>
@@ -879,11 +1095,130 @@ export default function App() {
             </>
           )}
 
-          {hasDocument && (!transcript || isEditingTranscript) && (
-            <VoiceRecorder onTranscriptReady={handleTranscriptReady} initialTranscript={isEditingTranscript ? transcript : undefined} onBack={handleBackToUpload} />
+          {/* Phase 11.2: review/edit milestones before recording */}
+          {hasDocument && !milestonesConfirmed && milestones.length > 0 && documentStatus === "ready" && !documentError && (
+            <div className="panel p-6 animate-fade-in">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-2 h-2 bg-brass rounded-sm" />
+                <h2 className="font-serif text-xl font-semibold text-parchment">Review Key Concepts</h2>
+              </div>
+              <h3 className="label-tag mb-1">Before you record — what you&apos;ll be tested on</h3>
+              <p className="font-mono text-xs text-parchment-muted mb-4">You can edit the wording or remove any concept you don&apos;t think is fair game. Core concepts weigh more than supporting ones.</p>
+              <div className="space-y-3">
+                {milestones.map((m, idx) => (
+                  <div key={m.id} className="p-3 rounded-panel border border-ink-border bg-ink flex items-start gap-3">
+                    <span className="font-mono text-xs text-brass mt-1 flex-shrink-0">{idx + 1}.</span>
+                    <div className="flex-1 min-w-0">
+                      <textarea
+                        value={m.text}
+                        onChange={(e) => {
+                          const next = milestones.map((x) => (x.id === m.id ? { ...x, text: e.target.value } : x))
+                          setMilestones(next)
+                        }}
+                        rows={2}
+                        className="w-full bg-ink-light border border-ink-border rounded-panel p-2 font-mono text-xs text-parchment focus:outline-none focus:border-brass transition-colors resize-y"
+                        aria-label={`Edit concept ${idx + 1}`}
+                      />
+                      <span className={`mt-1 inline-block font-mono text-[9px] px-1.5 py-0.5 rounded border ${m.importance === "supporting" ? "border-ink-border text-parchment-muted" : "border-brass/40 text-brass"}`}>
+                        {m.importance === "supporting" ? "Supporting concept" : "Core concept"}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (milestones.length <= 1) return
+                        setMilestones(milestones.filter((x) => x.id !== m.id))
+                      }}
+                      disabled={milestones.length <= 1}
+                      aria-label={`Remove concept ${idx + 1}`}
+                      title={milestones.length <= 1 ? "At least one concept is required" : "Remove concept"}
+                      className="text-parchment-muted hover:text-flagged transition-colors flex-shrink-0 disabled:opacity-30 disabled:hover:text-parchment-muted"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setMilestonesConfirmed(true)}
+                className="btn-primary w-full mt-5"
+                disabled={milestones.length === 0}
+              >
+                Start Recording — {milestones.length} concept{milestones.length === 1 ? "" : "s"}
+              </button>
+            </div>
           )}
 
-          {hasDocument && transcript && !isEditingTranscript && milestones.length === 0 && documentStatus !== "ready" && documentStatus !== "error" && (
+          {/* Recording stage */}
+          {hasDocument && milestonesConfirmed && !transcript && !isEditingTranscript && (
+            <VoiceRecorder onTranscriptReady={handleTranscriptReady} onBack={handleBackToUpload} />
+          )}
+
+          {/* Phase 8.1: transcript review / edit stage (immutable original stored separately) */}
+          {hasDocument && milestonesConfirmed && transcript && !transcriptCommitted && (
+            <div className="panel p-6 animate-fade-in">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-2 h-2 bg-brass rounded-sm" />
+                <h2 className="font-serif text-xl font-semibold text-parchment">Review Your Transcript</h2>
+              </div>
+              <h3 className="label-tag mb-1">Correct transcription errors (optional)</h3>
+              <p className="font-mono text-xs text-parchment-muted mb-3">
+                Fixing typos or misheard words helps accuracy. Significant rewording may not reflect your original explanation.
+              </p>
+              <textarea
+                value={transcript}
+                onChange={(e) => setTranscript(e.target.value)}
+                rows={6}
+                className="w-full rounded-panel bg-ink border border-ink-border p-4 font-mono text-sm text-parchment placeholder:text-parchment-muted focus:outline-none focus:border-brass transition-colors min-h-[120px] max-h-[260px] overflow-y-auto leading-relaxed"
+                placeholder="Your transcript will appear here…"
+                aria-label="Edit transcript"
+              />
+              {transcriptSignificantlyEdited && (
+                <div className="mt-3 p-3 rounded-panel border border-brass/30 bg-brass/5">
+                  <p className="font-mono text-xs text-brass leading-relaxed">
+                    Evaluated using your original spoken transcript. You made significant edits — view your edited version separately.
+                  </p>
+                  <button onClick={() => setShowDiffView((v) => !v)} className="font-mono text-xs text-brass hover:text-brass-light mt-2 underline">
+                    {showDiffView ? "Hide diff" : "Show diff (original vs edited)"}
+                  </button>
+                  {showDiffView && (
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <p className="font-mono text-[10px] text-parchment-muted mb-1">Original (evaluated)</p>
+                        <p className="font-mono text-[11px] text-parchment-muted whitespace-pre-wrap max-h-40 overflow-y-auto">{originalTranscript}</p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-[10px] text-parchment-muted mb-1">Your edited version</p>
+                        <p className="font-mono text-[11px] text-parchment whitespace-pre-wrap max-h-40 overflow-y-auto">{transcript}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => {
+                    // Recompute diff vs original and commit
+                    const ratio = computeWordDiffRatio(originalTranscript, transcript)
+                    setTranscriptSignificantlyEdited(ratio > SIGNIFICANT_EDIT_THRESHOLD)
+                    setIsEditingTranscript(false)
+                    setTranscriptCommitted(true)
+                  }}
+                  disabled={!transcript.trim()}
+                  className={`btn-primary flex-1 ${!transcript.trim() ? "opacity-40 cursor-not-allowed" : ""}`}
+                >
+                  Continue to Evaluation
+                </button>
+                <button onClick={() => { setTranscript(""); setOriginalTranscript(""); setTranscriptCommitted(false) }} className="btn-ghost">
+                  Re-record
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Analyzing notes indicator (during generation) */}
+          {hasDocument && documentStatus !== "ready" && documentStatus !== "error" && milestones.length === 0 && (
             <div className="panel p-6 text-center">
               <div className="w-2 h-2 bg-brass rounded-full animate-pulse mx-auto mb-3" />
               <p className="label-tag">Analyzing your notes...</p>
@@ -970,7 +1305,7 @@ export default function App() {
                 <span className="label-tag">/100</span>
               </div>
               <p className="font-mono text-[10px] text-parchment-muted mb-2">
-                Coverage {combinedResult.coverage_score}/100 + Clarity {combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score}/100 → Final {finalScore} (60% coverage, 40% clarity)
+                Final {finalScore}/100 combines four dimensions (40% coverage · 20% factual · 20% reasoning · 20% clarity). See breakdown below.
               </p>
               <div className="h-1 bg-ink-border rounded-sm overflow-hidden mb-3">
                 <div
@@ -982,6 +1317,18 @@ export default function App() {
               <p className="font-mono text-[10px] text-parchment-muted mb-4">
                 Coverage {combinedResult.coverage_score}/100 = sum of {combinedResult.details.map((d) => `${d.sub_score}/${d.max_score}`).join(" + ")} — inspectable per-concept below
               </p>
+
+              {/* Phase 10.1: four distinct evaluation dimensions (not one blended number) */}
+              <div className="mb-6 p-4 rounded-panel border border-ink-border bg-ink">
+                <h3 className="label-tag text-[10px] mb-3">Evaluation Dimensions</h3>
+                <DimBar label="Concept Coverage" score={combinedResult.coverage_score} color="bg-brass" />
+                <DimBar label="Factual Accuracy" score={combinedResult.factual_accuracy_score} color="bg-verified" />
+                <DimBar label="Reasoning Quality" score={combinedResult.reasoning_quality_score} color="bg-brass" />
+                <DimBar label="Communication Clarity" score={combinedResult.is_gaming_attempt ? 0 : combinedResult.clarity_score} color="bg-verified" />
+                <p className="font-mono text-[10px] text-parchment-muted mt-3">
+                  Coverage = which concepts you addressed. Factual Accuracy = whether what you said was correct (checked against your source material). Reasoning Quality = whether you explained WHY, not just WHAT. Clarity = how clearly you expressed it.
+                </p>
+              </div>
 
               {/* Low confidence informational note */}
               {combinedResult.confidence === "low" && (
@@ -998,12 +1345,14 @@ export default function App() {
                 <p className="font-serif text-sm text-parchment leading-relaxed">{combinedResult.summary}</p>
               </div>
 
-              {/* Flagged warning inline */}
+              {/* Flagged pattern note — descriptive, not accusatory (10.5) */}
               {combinedResult.is_gaming_attempt && (
-                <div className="p-4 rounded-panel border border-flagged/60 bg-flagged/10 mb-6 animate-shake">
-                  <p className="font-mono text-sm font-bold text-flagged tracking-wide">Explanation flagged for review</p>
+                <div className="p-4 rounded-panel border border-flagged/60 bg-flagged/10 mb-6">
+                  <p className="font-mono text-sm font-bold text-flagged tracking-wide">Explanation pattern noted</p>
                   <p className="font-mono text-xs text-flagged mt-2 leading-relaxed">{combinedResult.reasoning}</p>
-                  <p className="font-mono text-xs text-parchment-muted mt-3">Clarity was set to 0. Focus on connecting ideas with words like “because,” “therefore,” and “this means” to show how concepts relate.</p>
+                  <p className="font-mono text-xs text-parchment-muted mt-3">
+                    This explanation reads as a list of terms without connecting them — try explaining how these ideas relate to each other using words like “because,” “therefore,” and “this means.” Clarity was set to 0 for this pattern only; your coverage and factual scores still count.
+                  </p>
                 </div>
               )}
 
@@ -1032,6 +1381,15 @@ export default function App() {
                                 <span className="font-mono text-xs font-bold text-verified flex-shrink-0">{detail.sub_score}/{detail.max_score}</span>
                               </div>
                               <p className="font-mono text-xs text-verified mt-1.5 leading-relaxed">{detail.feedback}</p>
+                              {detail.reasoning_feedback && (
+                                <p className="font-mono text-[10px] text-parchment-muted mt-1.5 leading-relaxed">Reasoning: {detail.reasoning_feedback}</p>
+                              )}
+                              {detail.source_reference && detail.source_reference.trim() && (
+                                <details className="mt-2">
+                                  <summary className="font-mono text-[10px] text-brass cursor-pointer hover:text-brass-light">Source</summary>
+                                  <p className="font-mono text-[10px] text-parchment-muted mt-1 leading-relaxed italic border-l-2 border-brass/30 pl-2">{detail.source_reference}</p>
+                                </details>
+                              )}
                               {!detail.is_factually_correct && <p className="font-mono text-[10px] text-flagged mt-1">⚠ Flagged as factually incorrect — see feedback above</p>}
                             </div>
                           </div>
@@ -1064,6 +1422,15 @@ export default function App() {
                                 <span className={`font-mono text-xs font-bold flex-shrink-0 ${!detail.is_factually_correct ? "text-flagged" : "text-parchment-muted"}`}>{detail.sub_score}/{detail.max_score}</span>
                               </div>
                               <p className="font-mono text-xs text-parchment-muted mt-1.5 leading-relaxed">{detail.feedback}</p>
+                              {detail.reasoning_feedback && (
+                                <p className="font-mono text-[10px] text-parchment-muted mt-1.5 leading-relaxed">Reasoning: {detail.reasoning_feedback}</p>
+                              )}
+                              {detail.source_reference && detail.source_reference.trim() && (
+                                <details className="mt-2">
+                                  <summary className="font-mono text-[10px] text-brass cursor-pointer hover:text-brass-light">Source</summary>
+                                  <p className="font-mono text-[10px] text-parchment-muted mt-1 leading-relaxed italic border-l-2 border-brass/30 pl-2">{detail.source_reference}</p>
+                                </details>
+                              )}
                               {!detail.is_factually_correct && <p className="font-mono text-[10px] text-flagged mt-1">Factually incorrect — {detail.feedback}</p>}
                             </div>
                           </div>
@@ -1077,13 +1444,19 @@ export default function App() {
               <div className="mb-6 p-3 rounded-panel border border-ink-border bg-ink">
                 <h3 className="label-tag text-[10px] mb-2">Per-Concept Breakdown (traceable)</h3>
                 <div className="space-y-1.5">
-                  {combinedResult.details.map((d, i) => (
+                  {combinedResult.details.map((d, i) => {
+                    const imp = milestones[i]?.importance ?? "core"
+                    return (
                     <div key={`breakdown-${i}`} className="flex items-center justify-between gap-2 font-mono text-xs">
-                      <span className="text-parchment-muted truncate flex-1">Concept {i + 1} — {d.concept.slice(0, 40)}{d.concept.length > 40 ? "…" : ""}</span>
+                      <span className="text-parchment-muted truncate flex-1">
+                        <span className={`mr-1 px-1 rounded border ${imp === "supporting" ? "border-ink-border text-parchment-muted" : "border-brass/40 text-brass"}`}>{imp === "supporting" ? "sup" : "core"}</span>
+                        Concept {i + 1} — {d.concept.slice(0, 40)}{d.concept.length > 40 ? "…" : ""}
+                      </span>
                       <span className={`flex-shrink-0 font-bold ${d.sub_score >= d.max_score * 0.7 ? "text-verified" : d.sub_score === 0 ? "text-flagged" : "text-brass"}`}>{d.sub_score}/{d.max_score}</span>
                       <span className={`w-2 h-2 rounded-sm flex-shrink-0 ${d.is_factually_correct ? "bg-verified/50" : "bg-flagged"}`} title={d.is_factually_correct ? "factually correct" : "factually incorrect"} />
                     </div>
-                  ))}
+                    )
+                   })}
                   <div className="pt-2 mt-2 border-t border-ink-border flex items-center justify-between font-mono text-xs font-bold">
                     <span className="text-parchment">Total Coverage</span>
                     <span className="text-parchment">{combinedResult.coverage_score}/100</span>
@@ -1106,12 +1479,12 @@ export default function App() {
                 </div>
               )}
 
-              {/* Speech Analysis — acoustic/prosody supplementary signals (Phase 5) */}
+              {/* Speech Analysis — acoustic/prosody supplementary signals (Phase 5, reframed Phase 10.6) */}
               {combinedResult.acousticMetrics && (
                 <div className="p-4 rounded-panel border border-ink-border bg-ink mb-6">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-2 h-2 bg-brass rounded-sm" />
-                    <h3 className="label-tag text-[10px]">Speech Analysis</h3>
+                    <h3 className="label-tag text-[10px]">Speech Analysis (supplementary)</h3>
                   </div>
                   <div className="grid grid-cols-2 gap-3 font-mono text-xs">
                     <div>
@@ -1129,7 +1502,8 @@ export default function App() {
                       <span className="text-parchment-muted ml-1">{combinedResult.acousticMetrics.pitchVarianceScore < 20 ? "• flat, may indicate reading" : combinedResult.acousticMetrics.pitchVarianceScore > 60 ? "• expressive" : "• moderate"}</span>
                     </div>
                     <div className="col-span-2 font-mono text-[10px] text-parchment-muted leading-relaxed">
-                      {combinedResult.acousticMetrics.wordsPerMinute > 180 && combinedResult.acousticMetrics.pauseCount < 2 ? "Very fast speech with minimal pauses on a complex topic may indicate memorized recitation rather than genuine understanding." : combinedResult.acousticMetrics.pauseCount >= 2 && combinedResult.acousticMetrics.wordsPerMinute >= 120 && combinedResult.acousticMetrics.wordsPerMinute <= 160 ? "Natural pacing with brief pauses for thought is consistent with genuine explanation." : "Acoustic signals are supplementary — text analysis remains primary."}
+                      {combinedResult.acousticMetrics.wordsPerMinute > 180 && combinedResult.acousticMetrics.pauseCount < 2 ? "Very fast speech with minimal pauses may suggest rehearsed recitation, but this is only a weak hint — it never lowers your coverage or factual scores." : combinedResult.acousticMetrics.pauseCount >= 2 && combinedResult.acousticMetrics.wordsPerMinute >= 120 && combinedResult.acousticMetrics.wordsPerMinute <= 160 ? "Natural pacing with brief pauses for thought is consistent with genuine explanation." : "Acoustic signals are supplementary — text analysis remains primary."}
+                      <p className="mt-1">These are supplementary observations about delivery style, not a measure of understanding. Pace and pauses vary naturally by person, language background, and speaking style.</p>
                     </div>
                   </div>
                 </div>
@@ -1162,7 +1536,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Phase 3.2: Socratic follow-up question */}
+          {/* Phase 10.3 / 10.4: remediation + transfer follow-up pair */}
           {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && combinedResult && !isEvaluating && !evaluationError && (
             <>
               {followUpLoading && (
@@ -1171,45 +1545,73 @@ export default function App() {
                     <div className="w-2 h-2 bg-brass rounded-full animate-pulse" />
                     <h3 className="label-tag text-[10px]">Examiner&apos;s Follow-Up</h3>
                   </div>
-                  <p className="font-mono text-xs text-parchment-muted">Preparing a follow-up question…</p>
+                  <p className="font-mono text-xs text-parchment-muted">Preparing follow-up questions…</p>
                 </div>
               )}
-              {followUpQuestion && !followUpSkipped && !followUpLoading && (
-                <div className="panel p-6 animate-fade-in border-brass/30">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-2 h-2 bg-brass rounded-sm" />
-                    <h3 className="font-serif text-lg font-semibold text-parchment">Examiner&apos;s Follow-Up</h3>
+              {followUpPair && !followUpSkipped && !followUpLoading && (
+                <div className="panel p-6 animate-fade-in border-brass/30 space-y-5">
+                  {/* Remediation (gap-filling) */}
+                  <div>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-2 h-2 bg-flagged rounded-sm" />
+                      <h3 className="font-serif text-lg font-semibold text-parchment">Strengthen a Gap</h3>
+                    </div>
+                    <p className="label-tag text-[10px] mb-3">Remediation — reflection only, not re-graded</p>
+                    <p className="font-serif text-base text-parchment leading-relaxed border-l-2 border-flagged pl-4 py-1 mb-4">{followUpPair.remediation}</p>
+                    <label htmlFor="followup-answer" className="label-tag text-[10px] mb-2 block">
+                      Your response (optional)
+                    </label>
+                    <textarea
+                      id="followup-answer"
+                      value={followUpAnswer}
+                      onChange={(e) => setFollowUpAnswer(e.target.value)}
+                      placeholder="Type a brief reflection…"
+                      rows={3}
+                      className="w-full bg-ink border border-ink-border rounded-panel p-3 font-mono text-sm text-parchment placeholder:text-parchment-muted focus:outline-none focus:border-brass transition-colors min-h-[80px]"
+                    />
+                    <div className="flex gap-3 mt-3">
+                      <button onClick={() => setFollowUpSkipped(true)} className="btn-ghost text-xs flex-1">
+                        Skip
+                      </button>
+                      <button onClick={handleCheckFollowUpAnswer} disabled={!followUpAnswer.trim() || followUpChecking} className={`btn-ghost text-xs flex-1 ${!followUpAnswer.trim() || followUpChecking ? "opacity-40 cursor-not-allowed" : ""}`}>
+                        {followUpChecking ? "Checking…" : "Check my answer"}
+                      </button>
+                      <button onClick={() => setFollowUpSkipped(true)} className="btn-primary text-xs flex-1" disabled={!followUpAnswer.trim()}>
+                        Save reflection
+                      </button>
+                    </div>
+                    {/* Phase 10.4: supplementary micro-check result (does NOT change original score) */}
+                    {followUpCheck && (
+                      <div className={`mt-3 p-3 rounded-panel border ${followUpCheck.covered ? "border-verified/40 bg-verified/5" : "border-flagged/40 bg-flagged/5"}`}>
+                        <p className={`font-mono text-xs font-bold ${followUpCheck.covered ? "text-verified" : "text-flagged"}`}>
+                          {followUpCheck.covered ? "✓ Now correctly explained" : "Still missing: see below"}
+                        </p>
+                        {followUpCheck.feedback && <p className="font-mono text-[11px] text-parchment-muted mt-1 leading-relaxed">{followUpCheck.feedback}</p>}
+                        <p className="font-mono text-[10px] text-parchment-muted mt-2">This is a supplementary check only — it does not change your original overall score.</p>
+                      </div>
+                    )}
                   </div>
-                  <p className="label-tag text-[10px] mb-3">Socratic probe — reflection only, not re-graded</p>
-                  <p className="font-serif text-base text-parchment leading-relaxed border-l-2 border-brass pl-4 py-1 mb-4">{followUpQuestion}</p>
-                  <label htmlFor="followup-answer" className="label-tag text-[10px] mb-2 block">
-                    Your response (optional)
-                  </label>
-                  <textarea
-                    id="followup-answer"
-                    value={followUpAnswer}
-                    onChange={(e) => setFollowUpAnswer(e.target.value)}
-                    placeholder="Type a brief reflection…"
-                    rows={3}
-                    className="w-full bg-ink border border-ink-border rounded-panel p-3 font-mono text-sm text-parchment placeholder:text-parchment-muted focus:outline-none focus:border-brass transition-colors min-h-[80px]"
-                  />
-                  <div className="flex gap-3 mt-3">
-                    <button onClick={() => setFollowUpSkipped(true)} className="btn-ghost text-xs flex-1">
-                      Skip
-                    </button>
-                    <button onClick={() => setFollowUpSkipped(true)} className="btn-primary text-xs flex-1" disabled={!followUpAnswer.trim()}>
-                      Save reflection
-                    </button>
-                  </div>
+                  {/* Transfer / application question (test applying a concept to a new scenario) */}
+                  {followUpPair.transfer && (
+                    <div className="border-t border-ink-border pt-4">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-2 h-2 bg-verified rounded-sm" />
+                        <h3 className="font-serif text-lg font-semibold text-parchment">Apply What You Know</h3>
+                      </div>
+                      <p className="label-tag text-[10px] mb-3">Transfer question — can you apply a concept you explained well to a new situation?</p>
+                      <p className="font-serif text-base text-parchment leading-relaxed border-l-2 border-verified pl-4 py-1">{followUpPair.transfer}</p>
+                      <p className="font-mono text-[10px] text-parchment-muted mt-2">Reflection only — not scored.</p>
+                    </div>
+                  )}
                 </div>
               )}
-              {followUpQuestion && followUpSkipped && followUpAnswer.trim() && (
+              {followUpPair && followUpSkipped && followUpAnswer.trim() && (
                 <div className="panel p-6 animate-fade-in">
                   <div className="flex items-center gap-3 mb-3">
                     <div className="w-2 h-2 bg-verified rounded-sm" />
                     <h3 className="font-serif text-lg font-semibold text-parchment">Reflection Saved</h3>
                   </div>
-                  <p className="font-serif text-sm text-parchment leading-relaxed border-l-2 border-verified pl-4 py-1 mb-3">{followUpQuestion}</p>
+                  <p className="font-serif text-sm text-parchment leading-relaxed border-l-2 border-verified pl-4 py-1 mb-3">{followUpPair.remediation}</p>
                   <p className="font-mono text-xs text-parchment-muted mb-2">Your response:</p>
                   <p className="font-mono text-sm text-parchment bg-ink border border-ink-border rounded-panel p-3 whitespace-pre-wrap">{followUpAnswer}</p>
                   <p className="font-mono text-xs text-verified mt-3">Not re-graded — for your reflection only.</p>
@@ -1218,16 +1620,16 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {followUpError && !followUpLoading && !followUpQuestion && !followUpSkipped && (
+              {followUpError && !followUpLoading && !followUpPair && !followUpSkipped && (
                 <div className="panel p-4">
-                  <p className="font-mono text-xs text-parchment-muted">Follow-up question unavailable.</p>
+                  <p className="font-mono text-xs text-parchment-muted">Follow-up questions unavailable.</p>
                 </div>
               )}
               {followUpSkipped && !followUpAnswer.trim() && (
                 <div className="panel p-4">
                   <p className="font-mono text-xs text-parchment-muted">Follow-up skipped.</p>
                   <button onClick={() => setFollowUpSkipped(false)} className="font-mono text-xs text-brass hover:text-brass-light mt-2">
-                    Show question again
+                    Show questions again
                   </button>
                 </div>
               )}

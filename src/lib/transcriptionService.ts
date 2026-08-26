@@ -1,7 +1,15 @@
+import { isDemoMode } from "./security"
+import { DEMO_TRANSCRIPT } from "./demoFixtures"
+
 export async function transcribeAudio(
   base64Audio: string,
   mimeType: string,
 ): Promise<string> {
+  // Demo mode (?demo=true): return an offline fixture transcript, no network.
+  if (isDemoMode()) {
+    return DEMO_TRANSCRIPT
+  }
+
   const payload = {
     contents: [
       {

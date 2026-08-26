@@ -1,9 +1,13 @@
 export type SubjectDomain = "technical" | "narrative"
 
+export type MilestoneImportance = "core" | "supporting"
+
 export interface Milestone {
   id: number
   text: string
   covered: boolean
+  importance?: MilestoneImportance
+  sourceReference?: string
 }
 
 export interface MilestoneState {
@@ -12,6 +16,10 @@ export interface MilestoneState {
   error: string | null
   loading: boolean
   subjectDomain?: SubjectDomain
+  /** True when the content-quality guard rejected the material but the user may override */
+  canOverride?: boolean
+  /** Specific reason the guard rejected the material */
+  reason?: string
 }
 
 export interface CoverageDetail {
@@ -21,6 +29,12 @@ export interface CoverageDetail {
   sub_score: number
   max_score: number
   is_factually_correct: boolean
+  /** Per-concept reasoning-quality feedback (explaining WHY, causal/logical connection) */
+  reasoning_feedback?: string
+  /** Source excerpt this concept/feedback relates to */
+  source_reference?: string
+  /** Whether this concept's factual claim could be verified against the provided source material */
+  verifiable_from_source?: boolean
 }
 
 export interface CoverageResult {
