@@ -42,6 +42,14 @@ export const VoiceRecorder: React.FC<{
   // Phase 6.4: device capability + toggle for live preview
   const [showLivePreview, setShowLivePreview] = useState<boolean>(true)
   const [isLowEndDevice, setIsLowEndDevice] = useState(false)
+  const isRecordingRef = useRef(isRecording)
+  const showLivePreviewRef = useRef(showLivePreview)
+  useEffect(() => {
+    isRecordingRef.current = isRecording
+  }, [isRecording])
+  useEffect(() => {
+    showLivePreviewRef.current = showLivePreview
+  }, [showLivePreview])
 
   useEffect(() => {
     if (initialTranscript && initialTranscript.trim()) {
@@ -59,6 +67,7 @@ export const VoiceRecorder: React.FC<{
     const lowEnd = (hardwareConcurrency !== undefined && hardwareConcurrency <= 2) || isMobile
     setIsLowEndDevice(lowEnd)
     setShowLivePreview(!lowEnd)
+    console.log(`[VoiceRecorder] Device check: hardwareConcurrency=${hardwareConcurrency} isMobile=${isMobile} lowEnd=${lowEnd} showLivePreview default=${!lowEnd}`)
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current)
       if (metricsIntervalRef.current) window.clearInterval(metricsIntervalRef.current)
@@ -75,6 +84,98 @@ export const VoiceRecorder: React.FC<{
       }
     }
   }, [])
+
+  // Fix 2: ensure manual toggle overrides automatic default and actually starts/stops recognition during recording
+  const startLiveRecognition = () => {
+    try {
+      const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      if (!SpeechRecognition) {
+        console.warn("[VoiceRecorder] SpeechRecognition not supported in this browser")
+        return
+      }
+      if (liveRecognitionRef.current) {
+        try {
+          liveRecognitionRef.current.stop()
+        } catch {}
+        liveRecognitionRef.current = null
+      }
+      liveFinalRef.current = ""
+      setLivePreview("")
+      setLiveInterim("")
+      const rec = new SpeechRecognition()
+      rec.continuous = true
+      rec.interimResults = true
+      rec.lang = "en-US"
+      rec.onresult = (event: any) => {
+        let interim = ""
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t: string = event.results[i][0].transcript
+          if (event.results[i].isFinal) {
+            liveFinalRef.current += (liveFinalRef.current ? " " : "") + t
+          } else {
+            interim += t
+          }
+        }
+        setLivePreview(liveFinalRef.current)
+        setLiveInterim(interim)
+        console.log(`[VoiceRecorder] Live preview update: final="${liveFinalRef.current}" interim="${interim}"`)
+      }
+      rec.onerror = (e: any) => {
+        console.warn("[VoiceRecorder] SpeechRecognition error", e?.error || e)
+      }
+      rec.onend = () => {
+        console.log("[VoiceRecorder] SpeechRecognition onend, isRecording=", isRecordingRef.current, "showLivePreview=", showLivePreviewRef.current)
+        if (isRecordingRef.current && showLivePreviewRef.current && mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+          try {
+            rec.start()
+            console.log("[VoiceRecorder] Restarted SpeechRecognition after onend")
+          } catch (err) {
+            console.warn("[VoiceRecorder] Failed to restart recognition", err)
+          }
+        }
+      }
+      liveRecognitionRef.current = rec
+      try {
+        rec.start()
+        console.log("[VoiceRecorder] SpeechRecognition started successfully")
+      } catch (err) {
+        console.warn("[VoiceRecorder] Failed to start recognition", err)
+      }
+    } catch (err) {
+      console.warn("[VoiceRecorder] startLiveRecognition failed", err)
+    }
+  }
+
+  const stopLiveRecognition = () => {
+    if (liveRecognitionRef.current) {
+      try {
+        liveRecognitionRef.current.stop()
+        console.log("[VoiceRecorder] SpeechRecognition stopped")
+      } catch {}
+      liveRecognitionRef.current = null
+    }
+    setLivePreview("")
+    setLiveInterim("")
+    liveFinalRef.current = ""
+  }
+
+  // React to manual toggle during recording — this is the critical fix for Fix 2
+  useEffect(() => {
+    if (!isRecording) return
+    console.log(`[VoiceRecorder] Toggle changed during recording: showLivePreview=${showLivePreview} isRecording=${isRecording}`)
+    if (showLivePreview) {
+      if (!liveRecognitionRef.current) {
+        console.log("[VoiceRecorder] Toggle ON during recording — starting recognition")
+        startLiveRecognition()
+      }
+    } else {
+      if (liveRecognitionRef.current) {
+        console.log("[VoiceRecorder] Toggle OFF during recording — stopping recognition")
+        stopLiveRecognition()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLivePreview, isRecording])
 
   const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
 
@@ -367,46 +468,8 @@ export const VoiceRecorder: React.FC<{
         setRecordingTime((prev) => prev + 1)
       }, 1000)
 
-      // FIX 1 + 6.4: Start live captions only if enabled and not low-end by default
-      if (showLivePreview) {
-        try {
-          const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-          if (SpeechRecognition) {
-            liveFinalRef.current = ""
-            setLivePreview("")
-            setLiveInterim("")
-            const rec = new SpeechRecognition()
-            rec.continuous = true
-            rec.interimResults = true
-            rec.lang = "en-US"
-            rec.onresult = (event: any) => {
-              let interim = ""
-              for (let i = event.resultIndex; i < event.results.length; i++) {
-                const t: string = event.results[i][0].transcript
-                if (event.results[i].isFinal) {
-                  liveFinalRef.current += (liveFinalRef.current ? " " : "") + t
-                } else {
-                  interim += t
-                }
-              }
-              setLivePreview(liveFinalRef.current)
-              setLiveInterim(interim)
-            }
-            rec.onerror = () => {}
-            rec.onend = () => {
-              if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-                try {
-                  rec.start()
-                } catch {}
-              }
-            }
-            liveRecognitionRef.current = rec
-            try {
-              rec.start()
-            } catch {}
-          }
-        } catch {}
-      }
+      // Live preview will be started by the useEffect watching [showLivePreview, isRecording]
+      // (manual toggle overrides low-end default — Fix 2)
     } catch (err: unknown) {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop())

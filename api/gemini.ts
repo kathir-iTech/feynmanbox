@@ -167,20 +167,32 @@ export default async function handler(req: any, res: any) {
     const payloadStr = JSON.stringify(payload)
     console.log(`[gemini] Outgoing to Gemini model=${model} payloadSize=${Buffer.byteLength(payloadStr, "utf8")} bytes`)
 
-    // API key handling — support both GEMINI_API_KEY and fallback VITE_GEMINI_API_KEY for local dev
-    let apiKey = process.env.GEMINI_API_KEY
-    let keySource = "GEMINI_API_KEY"
-    if (!apiKey && process.env.VITE_GEMINI_API_KEY) {
-      apiKey = process.env.VITE_GEMINI_API_KEY
-      keySource = "VITE_GEMINI_API_KEY (fallback)"
-      console.warn("[gemini] Using VITE_GEMINI_API_KEY fallback — set GEMINI_API_KEY for production")
+    // API key handling — startup diagnostic (masked) for Vercel verification
+    const rawKey = process.env.GEMINI_API_KEY
+    if (rawKey) {
+      const masked = `${rawKey.slice(0, 4)}...${rawKey.slice(-4)} (length ${rawKey.length})`
+      console.log(`[gemini] Diagnostic: GEMINI_API_KEY present — ${masked}`)
+      // Safety: warn if key looks too short/truncated (real Gemini keys are ~39 chars, AIza...)
+      if (rawKey.length < 30) {
+        console.warn(`[gemini] WARNING: GEMINI_API_KEY length ${rawKey.length} is unusually short — may be truncated or invalid. Expected ~39 chars.`)
+      }
+      if (!rawKey.startsWith("AIza")) {
+        console.warn(`[gemini] WARNING: GEMINI_API_KEY does not start with "AIza" — may be invalid or wrong variable.`)
+      }
+    } else {
+      console.error("[gemini] Diagnostic: GEMINI_API_KEY is MISSING at runtime — check Vercel Dashboard → Project Settings → Environment Variables (Production)")
+      if (process.env.VITE_GEMINI_API_KEY) {
+        console.error("[gemini] Found VITE_GEMINI_API_KEY but IGNORED — server must use GEMINI_API_KEY (non-VITE_) only. VITE_ vars are client-exposed and stale fallback is disabled.")
+      }
     }
+
+    const apiKey = rawKey
     if (!apiKey) {
-      console.error("[gemini] Missing GEMINI_API_KEY (and no VITE_GEMINI_API_KEY fallback)")
-      res.status(500).json({ error: "Server misconfigured: missing GEMINI_API_KEY" })
+      console.error("[gemini] Missing GEMINI_API_KEY — server cannot call Gemini. Set it in Vercel Dashboard → Settings → Environment Variables for Production, then redeploy.")
+      res.status(500).json({ error: "Server misconfigured: missing GEMINI_API_KEY. Please set a valid server-side GEMINI_API_KEY in Vercel and redeploy." })
       return
     }
-    console.log(`[gemini] Using API key from ${keySource}, length=${apiKey.length}`)
+    console.log(`[gemini] Using API key from GEMINI_API_KEY, length=${apiKey.length}`)
 
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
 
