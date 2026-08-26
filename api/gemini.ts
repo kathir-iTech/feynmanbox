@@ -172,13 +172,14 @@ export default async function handler(req: any, res: any) {
     if (rawKey) {
       const masked = `${rawKey.slice(0, 4)}...${rawKey.slice(-4)} (length ${rawKey.length})`
       console.log(`[gemini] Diagnostic: GEMINI_API_KEY present — ${masked}`)
-      // Safety: warn if key looks too short/truncated (real Gemini keys are ~39 chars, AIza...)
-      if (rawKey.length < 30) {
-        console.warn(`[gemini] WARNING: GEMINI_API_KEY length ${rawKey.length} is unusually short — may be truncated or invalid. Expected ~39 chars.`)
+      // Safety: warn if key looks truncated or placeholder
+      if (rawKey.length < 20) {
+        console.warn(`[gemini] WARNING: GEMINI_API_KEY length ${rawKey.length} is unusually short — may be truncated or invalid.`)
       }
-      if (!rawKey.startsWith("AIza")) {
-        console.warn(`[gemini] WARNING: GEMINI_API_KEY does not start with "AIza" — may be invalid or wrong variable.`)
+      if (rawKey === "your_gemini_api_key_here" || rawKey.includes("your_gemini")) {
+        console.warn(`[gemini] WARNING: GEMINI_API_KEY appears to be a placeholder — set a real key from Google AI Studio.`)
       }
+      // Note: Valid keys may start with AIza (legacy) or AQ. (new format) — both are OK, length varies (39-60)
     } else {
       console.error("[gemini] Diagnostic: GEMINI_API_KEY is MISSING at runtime — check Vercel Dashboard → Project Settings → Environment Variables (Production)")
       if (process.env.VITE_GEMINI_API_KEY) {
