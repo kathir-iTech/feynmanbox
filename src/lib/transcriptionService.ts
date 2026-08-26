@@ -36,7 +36,7 @@ export async function transcribeAudio(
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ model: "gemini-flash-lite-latest", payload }),
+    body: JSON.stringify({ purpose: "transcription", payload }),
   })
 
   if (!response.ok) {
