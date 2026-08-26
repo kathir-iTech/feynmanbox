@@ -707,15 +707,21 @@ export default function App() {
             <div className="panel p-6">
               <div className="p-4 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
                 {evaluationError}
+                {evaluationError.includes("Too many requests") && <span className="block mt-2 text-[10px] opacity-80">Rate limit: 20 requests per 10 minutes. Please wait a minute before retrying.</span>}
               </div>
               <div className="flex gap-3 mt-4">
-                <button onClick={handleRetryEvaluation} className="btn-primary flex-1">
-                  Try Again
+                <button
+                  onClick={handleRetryEvaluation}
+                  disabled={evalCooldown}
+                  className={`btn-primary flex-1 ${evalCooldown ? "opacity-40 cursor-not-allowed" : ""}`}
+                >
+                  {evalCooldown ? "Please wait..." : "Try Again"}
                 </button>
                 <button onClick={handleBackToTranscript} className="btn-ghost">
                   Edit Transcript
                 </button>
               </div>
+              {evalCooldown && <p className="font-mono text-[10px] text-parchment-muted mt-2">Cooling down — please wait a moment before re-evaluating.</p>}
             </div>
           )}
 
