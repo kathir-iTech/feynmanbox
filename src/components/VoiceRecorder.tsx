@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { transcribeAudio, blobToBase64 } from "../lib/transcriptionService"
+import type { AcousticMetrics } from "../types"
 
 export const VoiceRecorder: React.FC<{
-  onTranscriptReady: (transcript: string) => void
+  onTranscriptReady: (transcript: string, metrics?: AcousticMetrics) => void
   initialTranscript?: string
   onBack?: () => void
 }> = ({ onTranscriptReady, initialTranscript, onBack }) => {
@@ -13,9 +14,9 @@ export const VoiceRecorder: React.FC<{
   const [hasRecording, setHasRecording] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recordingTime, setRecordingTime] = useState(0)
-  // FIX 1: live preview captions (visual only, discarded after)
   const [livePreview, setLivePreview] = useState("")
   const [liveInterim, setLiveInterim] = useState("")
+  const [pendingMetrics, setPendingMetrics] = useState<AcousticMetrics | null>(null)
 
   const streamRef = useRef<MediaStream | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -27,11 +28,21 @@ export const VoiceRecorder: React.FC<{
   const mainPathRef = useRef<SVGPathElement>(null)
   const shadowPathRef = useRef<SVGPathElement>(null)
   const [useFallbackWaveform, setUseFallbackWaveform] = useState(false)
-  // FIX 1: Web Speech refs
   const liveRecognitionRef = useRef<any>(null)
   const liveFinalRef = useRef<string>("")
 
-  // If editing an existing transcript, show it immediately
+  // Phase 5: acoustic metrics refs
+  const startTimeRef = useRef<number>(0)
+  const durationMsRef = useRef<number>(0)
+  const pauseCountRef = useRef<number>(0)
+  const totalPauseDurationRef = useRef<number>(0)
+  const silenceStartRef = useRef<number | null>(null)
+  const metricsIntervalRef = useRef<number | null>(null)
+  const pitchSamplesRef = useRef<number[]>([])
+  // Phase 6.4: device capability + toggle for live preview
+  const [showLivePreview, setShowLivePreview] = useState<boolean>(true)
+  const [isLowEndDevice, setIsLowEndDevice] = useState(false)
+
   useEffect(() => {
     if (initialTranscript && initialTranscript.trim()) {
       setEditableTranscript(initialTranscript)
@@ -42,14 +53,20 @@ export const VoiceRecorder: React.FC<{
   useEffect(() => {
     const supported = !!navigator.mediaDevices?.getUserMedia && typeof window.MediaRecorder !== "undefined"
     setIsSupported(supported)
+    // Phase 6.4: detect low-end / mobile for live preview default
+    const hardwareConcurrency = (navigator as any).hardwareConcurrency as number | undefined
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    const lowEnd = (hardwareConcurrency !== undefined && hardwareConcurrency <= 2) || isMobile
+    setIsLowEndDevice(lowEnd)
+    setShowLivePreview(!lowEnd)
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current)
+      if (metricsIntervalRef.current) window.clearInterval(metricsIntervalRef.current)
       if (animationRef.current) cancelAnimationFrame(animationRef.current)
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop())
       if (audioContextRef.current && audioContextRef.current.state !== "closed") {
         audioContextRef.current.close().catch(() => {})
       }
-      // FIX 1: cleanup live caption recognition
       if (liveRecognitionRef.current) {
         try {
           liveRecognitionRef.current.stop()
@@ -123,6 +140,63 @@ export const VoiceRecorder: React.FC<{
     animationRef.current = requestAnimationFrame(drawWaveform)
   }
 
+  // Phase 5: sample acoustic features during recording
+  const sampleAcousticFeatures = () => {
+    const analyser = analyserRef.current
+    if (!analyser) return
+    const now = Date.now()
+    // Pause detection via amplitude threshold
+    const bufferLength = analyser.fftSize
+    const timeData = new Uint8Array(bufferLength)
+    analyser.getByteTimeDomainData(timeData)
+    let sumAbs = 0
+    for (let i = 0; i < timeData.length; i++) sumAbs += Math.abs(timeData[i] - 128)
+    const avgAbs = sumAbs / timeData.length
+    const isSilent = avgAbs < 4.5 // threshold for silence
+    if (isSilent) {
+      if (silenceStartRef.current === null) silenceStartRef.current = now
+    } else {
+      if (silenceStartRef.current !== null) {
+        const silenceDuration = now - silenceStartRef.current
+        if (silenceDuration >= 700) {
+          pauseCountRef.current += 1
+          totalPauseDurationRef.current += silenceDuration
+        }
+        silenceStartRef.current = null
+      }
+    }
+    // Pitch variance via frequency-domain variance (lightweight proxy)
+    try {
+      const freqData = new Uint8Array(analyser.frequencyBinCount)
+      analyser.getByteFrequencyData(freqData)
+      let mean = 0
+      for (let i = 0; i < freqData.length; i++) mean += freqData[i]
+      mean /= freqData.length
+      let variance = 0
+      for (let i = 0; i < freqData.length; i++) variance += (freqData[i] - mean) * (freqData[i] - mean)
+      variance /= freqData.length
+      // Normalize variance to 0-100 score: typical variance 0-3000, map via /30 capped at 100
+      const pitchScore = Math.min(100, variance / 30)
+      pitchSamplesRef.current.push(pitchScore)
+      if (pitchSamplesRef.current.length > 200) pitchSamplesRef.current.shift()
+    } catch {
+      // ignore frequency errors
+    }
+  }
+
+  const computePitchVarianceScore = (): number => {
+    const samples = pitchSamplesRef.current
+    if (samples.length === 0) return 50
+    const avg = samples.reduce((a, b) => a + b, 0) / samples.length
+    // Also consider variance of pitch scores themselves (expressiveness)
+    let varSum = 0
+    for (const s of samples) varSum += (s - avg) * (s - avg)
+    const spread = Math.sqrt(varSum / samples.length)
+    // Combine avg and spread: expressive speech has moderate avg (20-60) + some spread
+    const combined = Math.min(100, avg * 0.7 + spread * 1.8)
+    return Math.round(combined * 10) / 10
+  }
+
   const startRecording = async () => {
     setError(null)
     setEditableTranscript("")
@@ -133,6 +207,18 @@ export const VoiceRecorder: React.FC<{
     setLiveInterim("")
     liveFinalRef.current = ""
     chunksRef.current = []
+    setPendingMetrics(null)
+    // Reset acoustic metrics
+    startTimeRef.current = Date.now()
+    durationMsRef.current = 0
+    pauseCountRef.current = 0
+    totalPauseDurationRef.current = 0
+    silenceStartRef.current = null
+    pitchSamplesRef.current = []
+    if (metricsIntervalRef.current) {
+      window.clearInterval(metricsIntervalRef.current)
+      metricsIntervalRef.current = null
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -146,7 +232,6 @@ export const VoiceRecorder: React.FC<{
       })
       streamRef.current = stream
 
-      // Setup waveform — respect reduced motion preference
       const shouldAnimate = !prefersReducedMotion
       if (!shouldAnimate) {
         setUseFallbackWaveform(false)
@@ -160,16 +245,22 @@ export const VoiceRecorder: React.FC<{
           if (ctx.state === "suspended") await ctx.resume()
           const analyser = ctx.createAnalyser()
           analyser.fftSize = 256
+          analyser.smoothingTimeConstant = 0.8
           const source = ctx.createMediaStreamSource(stream)
           source.connect(analyser)
           analyserRef.current = analyser
           drawWaveform()
+          // Start acoustic sampling
+          metricsIntervalRef.current = window.setInterval(sampleAcousticFeatures, 120)
         } catch {
           setUseFallbackWaveform(true)
         }
       }
+      if (!analyserRef.current && !metricsIntervalRef.current) {
+        // Fallback: still try to sample if analyser missing but we have stream
+        // No analyser, metrics will be defaults
+      }
 
-      // Setup MediaRecorder — FIX 2: high bitrate for better accuracy
       let mimeType = "audio/webm"
       if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
         mimeType = "audio/webm;codecs=opus"
@@ -187,8 +278,22 @@ export const VoiceRecorder: React.FC<{
       }
 
       recorder.onstop = async () => {
+        const endTime = Date.now()
+        durationMsRef.current = endTime - startTimeRef.current
+        // Finalize pause: if currently in silence, count it if >=700ms
+        if (silenceStartRef.current !== null) {
+          const dur = endTime - silenceStartRef.current
+          if (dur >= 700) {
+            pauseCountRef.current += 1
+            totalPauseDurationRef.current += dur
+          }
+          silenceStartRef.current = null
+        }
+        if (metricsIntervalRef.current) {
+          window.clearInterval(metricsIntervalRef.current)
+          metricsIntervalRef.current = null
+        }
         const blob = new Blob(chunksRef.current, { type: mimeType })
-        // Cleanup waveform
         if (animationRef.current) {
           cancelAnimationFrame(animationRef.current)
           animationRef.current = null
@@ -208,7 +313,6 @@ export const VoiceRecorder: React.FC<{
         }
         setIsRecording(false)
         setUseFallbackWaveform(false)
-        // FIX 1: stop and discard live preview (visual only)
         if (liveRecognitionRef.current) {
           try {
             liveRecognitionRef.current.stop()
@@ -227,7 +331,6 @@ export const VoiceRecorder: React.FC<{
           return
         }
 
-        // Transcribe via Gemini — via server proxy
         setIsTranscribing(true)
         try {
           const base64 = await blobToBase64(blob)
@@ -235,6 +338,20 @@ export const VoiceRecorder: React.FC<{
           const transcript = await transcribeAudio(base64, apiMime)
           setEditableTranscript(transcript)
           setHasRecording(true)
+          // Phase 5: compute acoustic metrics from transcript + duration + pause/pitch data
+          const wordCount = transcript.trim().split(/\s+/).filter(Boolean).length
+          const durationMinutes = Math.max(0.1, durationMsRef.current / 60000)
+          const wpm = Math.round(wordCount / durationMinutes)
+          const pitchVarianceScore = computePitchVarianceScore()
+          const metrics: AcousticMetrics = {
+            wordsPerMinute: Number.isFinite(wpm) ? wpm : 0,
+            pauseCount: pauseCountRef.current,
+            totalPauseDuration: totalPauseDurationRef.current,
+            pitchVarianceScore,
+            recordingDurationMs: durationMsRef.current,
+          }
+          setPendingMetrics(metrics)
+          console.log("[AcousticMetrics]", metrics, "words:", wordCount, "durationMs:", durationMsRef.current)
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : "We couldn't transcribe your audio. Please try again."
           setError(msg)
@@ -246,53 +363,51 @@ export const VoiceRecorder: React.FC<{
       recorder.start()
       setIsRecording(true)
 
-      // Timer
       timerRef.current = window.setInterval(() => {
         setRecordingTime((prev) => prev + 1)
       }, 1000)
 
-      // FIX 1: Start lightweight live captions (Web Speech, visual only, parallel — discarded after)
-      // No debouncing/throttling: every onresult is processed immediately
-      try {
-        const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-        if (SpeechRecognition) {
-          liveFinalRef.current = ""
-          setLivePreview("")
-          setLiveInterim("")
-          const rec = new SpeechRecognition()
-          rec.continuous = true
-          rec.interimResults = true
-          rec.lang = "en-US"
-          rec.onresult = (event: any) => {
-            let interim = ""
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-              const t: string = event.results[i][0].transcript
-              if (event.results[i].isFinal) {
-                liveFinalRef.current += (liveFinalRef.current ? " " : "") + t
-              } else {
-                interim += t
+      // FIX 1 + 6.4: Start live captions only if enabled and not low-end by default
+      if (showLivePreview) {
+        try {
+          const SpeechRecognition: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+          if (SpeechRecognition) {
+            liveFinalRef.current = ""
+            setLivePreview("")
+            setLiveInterim("")
+            const rec = new SpeechRecognition()
+            rec.continuous = true
+            rec.interimResults = true
+            rec.lang = "en-US"
+            rec.onresult = (event: any) => {
+              let interim = ""
+              for (let i = event.resultIndex; i < event.results.length; i++) {
+                const t: string = event.results[i][0].transcript
+                if (event.results[i].isFinal) {
+                  liveFinalRef.current += (liveFinalRef.current ? " " : "") + t
+                } else {
+                  interim += t
+                }
+              }
+              setLivePreview(liveFinalRef.current)
+              setLiveInterim(interim)
+            }
+            rec.onerror = () => {}
+            rec.onend = () => {
+              if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+                try {
+                  rec.start()
+                } catch {}
               }
             }
-            setLivePreview(liveFinalRef.current)
-            setLiveInterim(interim)
+            liveRecognitionRef.current = rec
+            try {
+              rec.start()
+            } catch {}
           }
-          rec.onerror = () => {}
-          rec.onend = () => {
-            if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-              try {
-                rec.start()
-              } catch {}
-            }
-          }
-          liveRecognitionRef.current = rec
-          try {
-            rec.start()
-          } catch {}
-        }
-      } catch {}
+        } catch {}
+      }
     } catch (err: unknown) {
-      // Mic leak fix: if getUserMedia succeeded but MediaRecorder construction failed,
-      // the stream is already acquired and must be stopped explicitly
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop())
         streamRef.current = null
@@ -300,6 +415,10 @@ export const VoiceRecorder: React.FC<{
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current)
         animationRef.current = null
+      }
+      if (metricsIntervalRef.current) {
+        window.clearInterval(metricsIntervalRef.current)
+        metricsIntervalRef.current = null
       }
       if (audioContextRef.current && audioContextRef.current.state !== "closed") {
         audioContextRef.current.close().catch(() => {})
@@ -324,7 +443,6 @@ export const VoiceRecorder: React.FC<{
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop()
     }
-    // FIX 1: also stop live preview immediately on user stop
     if (liveRecognitionRef.current) {
       try {
         liveRecognitionRef.current.stop()
@@ -334,6 +452,7 @@ export const VoiceRecorder: React.FC<{
       window.clearInterval(timerRef.current)
       timerRef.current = null
     }
+    // metrics interval cleared in onstop to capture final silence
   }
 
   const handleReset = () => {
@@ -345,6 +464,7 @@ export const VoiceRecorder: React.FC<{
     setIsRecording(false)
     setLivePreview("")
     setLiveInterim("")
+    setPendingMetrics(null)
     liveFinalRef.current = ""
     if (liveRecognitionRef.current) {
       try {
@@ -357,6 +477,10 @@ export const VoiceRecorder: React.FC<{
       cancelAnimationFrame(animationRef.current)
       animationRef.current = null
     }
+    if (metricsIntervalRef.current) {
+      window.clearInterval(metricsIntervalRef.current)
+      metricsIntervalRef.current = null
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop())
       streamRef.current = null
@@ -365,12 +489,31 @@ export const VoiceRecorder: React.FC<{
       audioContextRef.current.close().catch(() => {})
       audioContextRef.current = null
     }
+    startTimeRef.current = 0
+    durationMsRef.current = 0
+    pauseCountRef.current = 0
+    totalPauseDurationRef.current = 0
+    silenceStartRef.current = null
+    pitchSamplesRef.current = []
   }
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60)
     const sec = s % 60
     return `${m}:${sec.toString().padStart(2, "0")}`
+  }
+
+  const handleConfirm = () => {
+    if (!editableTranscript.trim()) return
+    // Recompute WPM based on possibly edited transcript and original duration
+    let finalMetrics = pendingMetrics
+    if (pendingMetrics && durationMsRef.current > 0) {
+      const wordCount = editableTranscript.trim().split(/\s+/).filter(Boolean).length
+      const durationMinutes = Math.max(0.1, durationMsRef.current / 60000)
+      const wpm = Math.round(wordCount / durationMinutes)
+      finalMetrics = { ...pendingMetrics, wordsPerMinute: wpm }
+    }
+    onTranscriptReady(editableTranscript, finalMetrics ?? undefined)
   }
 
   return (
@@ -411,6 +554,9 @@ export const VoiceRecorder: React.FC<{
           <button onClick={startRecording} className="btn-primary w-full">
             Begin Recording
           </button>
+          {isLowEndDevice && (
+            <p className="font-mono text-[10px] text-parchment-muted mt-2 text-center">Live preview disabled by default on this device for performance. You can enable it below.</p>
+          )}
         </div>
       )}
 
@@ -421,7 +567,13 @@ export const VoiceRecorder: React.FC<{
             <h2 className="font-serif text-xl font-semibold text-parchment">Recording</h2>
             <span className="ml-auto font-mono text-xs text-parchment-muted">{formatTime(recordingTime)}</span>
           </div>
-          <h3 className="label-tag mb-4">Live Signal</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="label-tag">Live Signal</h3>
+            <label className="flex items-center gap-1.5 font-mono text-[10px] text-parchment-muted cursor-pointer">
+              <input type="checkbox" checked={showLivePreview} onChange={(e) => setShowLivePreview(e.target.checked)} className="accent-brass w-3 h-3" />
+              Show live preview: {showLivePreview ? "On" : "Off"}
+            </label>
+          </div>
 
           <div className="polygraph-grid rounded-panel border border-ink-border p-4 bg-ink">
             <div className="flex items-center gap-2 mb-2">
@@ -452,19 +604,20 @@ export const VoiceRecorder: React.FC<{
               )}
             </svg>
           </div>
-          {/* FIX 1: Live preview captions — visual only, discarded after */}
-          <div className="mt-3 p-3 rounded-panel bg-ink border border-ink-border min-h-[52px] max-h-[96px] overflow-y-auto">
-            <h3 className="label-tag text-[10px] mb-1">Live preview — approximate</h3>
-            {livePreview || liveInterim ? (
-              <p className="font-mono text-xs text-parchment-muted leading-relaxed whitespace-pre-wrap">
-                {livePreview}
-                {livePreview && liveInterim ? " " : ""}
-                <span className="italic text-parchment-muted">{liveInterim}</span>
-              </p>
-            ) : (
-              <p className="font-mono text-xs text-parchment-muted italic">Listening… approximate captions will appear here.</p>
-            )}
-          </div>
+          {showLivePreview && (
+            <div className="mt-3 p-3 rounded-panel bg-ink border border-ink-border min-h-[52px] max-h-[96px] overflow-y-auto">
+              <h3 className="label-tag text-[10px] mb-1">Live preview — approximate</h3>
+              {livePreview || liveInterim ? (
+                <p className="font-mono text-xs text-parchment-muted leading-relaxed whitespace-pre-wrap">
+                  {livePreview}
+                  {livePreview && liveInterim ? " " : ""}
+                  <span className="italic text-parchment-muted">{liveInterim}</span>
+                </p>
+              ) : (
+                <p className="font-mono text-xs text-parchment-muted italic">Listening… approximate captions will appear here.</p>
+              )}
+            </div>
+          )}
           <p className="font-mono text-[10px] text-parchment-muted mt-2 text-center">Speak clearly — your audio is being captured continuously.</p>
 
           <button
@@ -505,6 +658,15 @@ export const VoiceRecorder: React.FC<{
             aria-label="Edit transcript"
           />
 
+          {pendingMetrics && (
+            <div className="mt-3 p-3 rounded-panel border border-ink-border bg-ink">
+              <h3 className="label-tag text-[10px] mb-1">Speech Analysis (preview)</h3>
+              <p className="font-mono text-xs text-parchment-muted">
+                Pace: {pendingMetrics.wordsPerMinute} WPM • Pauses: {pendingMetrics.pauseCount} ({(pendingMetrics.totalPauseDuration / 1000).toFixed(1)}s) • Pitch variance: {pendingMetrics.pitchVarianceScore.toFixed(1)}/100
+              </p>
+            </div>
+          )}
+
           {error && (
             <div className="mt-3 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
               {error}
@@ -513,7 +675,7 @@ export const VoiceRecorder: React.FC<{
 
           <div className="flex gap-3 mt-4">
             <button
-              onClick={() => onTranscriptReady(editableTranscript)}
+              onClick={handleConfirm}
               disabled={!editableTranscript.trim()}
               className={`btn-primary flex-1 ${!editableTranscript.trim() ? "opacity-40 cursor-not-allowed" : ""}`}
             >
