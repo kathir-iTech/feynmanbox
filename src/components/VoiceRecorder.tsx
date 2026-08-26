@@ -6,7 +6,8 @@ export const VoiceRecorder: React.FC<{
   onTranscriptReady: (transcript: string, metrics?: AcousticMetrics) => void
   initialTranscript?: string
   onBack?: () => void
-}> = ({ onTranscriptReady, initialTranscript, onBack }) => {
+  autoStart?: boolean
+}> = ({ onTranscriptReady, initialTranscript, onBack, autoStart }) => {
   const [isSupported, setIsSupported] = useState<boolean>(true)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
@@ -85,6 +86,16 @@ export const VoiceRecorder: React.FC<{
     }
   }, [])
 
+  // BUG 2 FIX: Auto-start recording immediately when autoStart is true (no intermediate screen)
+  const hasAutoStartedRef = useRef(false)
+  useEffect(() => {
+    if (autoStart && isSupported && !isRecording && !isTranscribing && !hasRecording && !hasAutoStartedRef.current) {
+      hasAutoStartedRef.current = true
+      startRecording()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, isSupported])
+
   // Fix 2: ensure manual toggle overrides automatic default and actually starts/stops recognition during recording
   const startLiveRecognition = () => {
     try {
@@ -124,8 +135,9 @@ export const VoiceRecorder: React.FC<{
         console.warn("[VoiceRecorder] SpeechRecognition error", e?.error || e)
       }
       rec.onend = () => {
-        console.log("[VoiceRecorder] SpeechRecognition onend, isRecording=", isRecordingRef.current, "showLivePreview=", showLivePreviewRef.current)
-        if (isRecordingRef.current && showLivePreviewRef.current && mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        console.log("[VoiceRecorder] SpeechRecognition onend, isRecording=", isRecordingRef.current)
+        // BUG 3 FIX: Always restart recognition while recording is active (toggle only controls UI visibility)
+        if (isRecordingRef.current && mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
           try {
             rec.start()
             console.log("[VoiceRecorder] Restarted SpeechRecognition after onend")
@@ -146,36 +158,23 @@ export const VoiceRecorder: React.FC<{
     }
   }
 
-  const stopLiveRecognition = () => {
-    if (liveRecognitionRef.current) {
-      try {
-        liveRecognitionRef.current.stop()
-        console.log("[VoiceRecorder] SpeechRecognition stopped")
-      } catch {}
-      liveRecognitionRef.current = null
-    }
-    setLivePreview("")
-    setLiveInterim("")
-    liveFinalRef.current = ""
-  }
-
-  // React to manual toggle during recording — this is the critical fix for Fix 2
+  // BUG 3 FIX: Start recognition immediately when recording begins (always in background).
+  // The toggle ONLY controls visibility of the live caption text, not whether recognition runs.
   useEffect(() => {
     if (!isRecording) return
-    console.log(`[VoiceRecorder] Toggle changed during recording: showLivePreview=${showLivePreview} isRecording=${isRecording}`)
-    if (showLivePreview) {
-      if (!liveRecognitionRef.current) {
-        console.log("[VoiceRecorder] Toggle ON during recording — starting recognition")
-        startLiveRecognition()
-      }
-    } else {
-      if (liveRecognitionRef.current) {
-        console.log("[VoiceRecorder] Toggle OFF during recording — stopping recognition")
-        stopLiveRecognition()
-      }
+    if (!liveRecognitionRef.current) {
+      startLiveRecognition()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showLivePreview, isRecording])
+  }, [isRecording])
+
+  // Restart recognition if it ends unexpectedly while still recording (regardless of toggle state)
+  useEffect(() => {
+    if (!isRecording) return
+    if (liveRecognitionRef.current) return
+    startLiveRecognition()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livePreview, liveInterim, isRecording])
 
   const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
 

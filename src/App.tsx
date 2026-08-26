@@ -44,33 +44,12 @@ function computeFingerprint(milestones: Milestone[]): string {
   return simpleHash(joined)
 }
 
-/** Word-level edit-distance ratio between two strings (0 = identical, ~1 = completely different). */
-function computeWordDiffRatio(a: string, b: string): number {
-  const tokenize = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
-  const aw = tokenize(a)
-  const bw = tokenize(b)
-  const maxLen = Math.max(aw.length, bw.length, 1)
-  // Levenshtein on word arrays (substitution cost 1)
-  const dp: number[] = Array.from({ length: bw.length + 1 }, (_, i) => i)
-  for (let i = 1; i <= aw.length; i++) {
-    let prev = dp[0]
-    dp[0] = i
-    for (let j = 1; j <= bw.length; j++) {
-      const temp = dp[j]
-      const cost = aw[i - 1] === bw[j - 1] ? 0 : 1
-      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost)
-      prev = temp
-    }
-  }
-  return dp[bw.length] / maxLen
+/** Auto-resize a textarea to fit its content height (no internal scroll). */
+function autoResize(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  el.style.height = "auto"
+  el.style.height = `${el.scrollHeight}px`
 }
-
-const SIGNIFICANT_EDIT_THRESHOLD = 0.15
 
 function Sparkline({ scores }: { scores: number[] }) {
   if (scores.length < 2) return null
@@ -406,7 +385,6 @@ export default function App() {
   const [originalTranscript, setOriginalTranscript] = useState<string>("")
   const [transcriptCommitted, setTranscriptCommitted] = useState(false)
   const [transcriptSignificantlyEdited, setTranscriptSignificantlyEdited] = useState(false)
-  const [showDiffView, setShowDiffView] = useState(false)
 
   // Phase 11.2: review/edit milestones before recording
   const [milestonesConfirmed, setMilestonesConfirmed] = useState(false)
@@ -590,6 +568,17 @@ export default function App() {
     }
   }
 
+  // BUG 5 FIX: "Try again" after content-guard rejection re-runs milestone generation
+  // from the SAME already-extracted document text, instead of resetting to empty upload screen.
+  const handleRetryContentGuard = async () => {
+    const readyDocs = uploadedDocs.filter((d) => d.status === "ready" && d.text.trim())
+    if (readyDocs.length === 0) return
+    const combined = readyDocs.map((d) => `--- ${d.fileName} ---\n${d.text.trim()}`).join("\n\n")
+    milestoneGenIdRef.current += 1
+    setContentGuardCanOverride(false)
+    return processNotesToMilestones(combined)
+  }
+
   // Phase 8.1: choose which transcript to evaluate. Minor edits (typo/mishear fixes, <= threshold)
   // transparently improve accuracy, so we evaluate the EDITED version. Significant rewrites (> threshold)
   // are evaluated against the ORIGINAL spoken transcript, with a transparent flag shown to the user.
@@ -752,7 +741,6 @@ export default function App() {
     setTranscriptCommitted(false)
     setTranscriptSignificantlyEdited(false)
 
-    setShowDiffView(false)
     setMilestonesConfirmed(false)
     setCombinedResult(null)
     setIsEvaluating(false)
@@ -789,7 +777,6 @@ export default function App() {
     setTranscriptCommitted(false)
     setTranscriptSignificantlyEdited(false)
 
-    setShowDiffView(false)
     setMilestonesConfirmed(false)
     setDocumentStatus("idle")
     setDocumentError(null)
@@ -815,7 +802,6 @@ export default function App() {
     setIsEditingTranscript(true)
     setTranscriptCommitted(false)
     setTranscriptSignificantlyEdited(false)
-    setShowDiffView(false)
 
     setFollowUpLoading(false)
     setFollowUpAnswer("")
@@ -832,10 +818,12 @@ export default function App() {
     // Phase 8.1: store the ORIGINAL (spoken) transcript immutably; the editable copy starts identical.
     setOriginalTranscript(newTranscript)
     setTranscript(newTranscript)
-    setTranscriptCommitted(false)
+    // BUG 4 FIX: Commit transcript immediately — no intermediate review screen.
+    // This triggers the auto-evaluation useEffect, so clicking "Confirm & Evaluate" goes
+    // straight to "Analyzing your explanation..." with zero extra clicks.
+    setTranscriptCommitted(true)
     setTranscriptSignificantlyEdited(false)
 
-    setShowDiffView(false)
     if (metrics) setAcousticMetrics(metrics)
     setIsEditingTranscript(false)
     setCombinedResult(null)
@@ -967,7 +955,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-ink">
-      <div className="max-w-3xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
+      <div className="max-w-3xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
         <header className="mb-10 text-center relative">
           <HeaderBar onNewSession={handleReset} onHistory={() => setHistoryOpen(true)} hasHistory={hasHistory} />
           <h1 className="font-serif text-4xl sm:text-5xl font-bold text-parchment tracking-tight">FeynmanBox</h1>
@@ -1005,7 +993,7 @@ export default function App() {
                       : documentError || "Error processing notes"}
               </span>
               {documentStatus === "error" && (
-                <button onClick={handleReset} className="ml-auto font-mono text-xs text-brass hover:text-brass-light flex-shrink-0">
+                <button onClick={handleRetryContentGuard} className="ml-auto font-mono text-xs text-brass hover:text-brass-light flex-shrink-0">
                   Try again
                 </button>
               )}
@@ -1115,8 +1103,9 @@ export default function App() {
                           const next = milestones.map((x) => (x.id === m.id ? { ...x, text: e.target.value } : x))
                           setMilestones(next)
                         }}
-                        rows={2}
-                        className="w-full bg-ink-light border border-ink-border rounded-panel p-2 font-mono text-xs text-parchment focus:outline-none focus:border-brass transition-colors resize-y"
+                        onInput={(e) => autoResize(e.target as HTMLTextAreaElement)}
+                        ref={(el) => autoResize(el)}
+                        className="w-full bg-ink-light border border-ink-border rounded-panel p-2 font-mono text-xs text-parchment focus:outline-none focus:border-brass transition-colors resize-none overflow-hidden"
                         aria-label={`Edit concept ${idx + 1}`}
                       />
                       <span className={`mt-1 inline-block font-mono text-[9px] px-1.5 py-0.5 rounded border ${m.importance === "supporting" ? "border-ink-border text-parchment-muted" : "border-brass/40 text-brass"}`}>
@@ -1152,70 +1141,10 @@ export default function App() {
 
           {/* Recording stage */}
           {hasDocument && milestonesConfirmed && !transcript && !isEditingTranscript && (
-            <VoiceRecorder onTranscriptReady={handleTranscriptReady} onBack={handleBackToUpload} />
+            <VoiceRecorder onTranscriptReady={handleTranscriptReady} onBack={handleBackToUpload} autoStart />
           )}
 
-          {/* Phase 8.1: transcript review / edit stage (immutable original stored separately) */}
-          {hasDocument && milestonesConfirmed && transcript && !transcriptCommitted && (
-            <div className="panel p-6 animate-fade-in">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-2 h-2 bg-brass rounded-sm" />
-                <h2 className="font-serif text-xl font-semibold text-parchment">Review Your Transcript</h2>
-              </div>
-              <h3 className="label-tag mb-1">Correct transcription errors (optional)</h3>
-              <p className="font-mono text-xs text-parchment-muted mb-3">
-                Fixing typos or misheard words helps accuracy. Significant rewording may not reflect your original explanation.
-              </p>
-              <textarea
-                value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
-                rows={6}
-                className="w-full rounded-panel bg-ink border border-ink-border p-4 font-mono text-sm text-parchment placeholder:text-parchment-muted focus:outline-none focus:border-brass transition-colors min-h-[120px] max-h-[260px] overflow-y-auto leading-relaxed"
-                placeholder="Your transcript will appear here…"
-                aria-label="Edit transcript"
-              />
-              {transcriptSignificantlyEdited && (
-                <div className="mt-3 p-3 rounded-panel border border-brass/30 bg-brass/5">
-                  <p className="font-mono text-xs text-brass leading-relaxed">
-                    Evaluated using your original spoken transcript. You made significant edits — view your edited version separately.
-                  </p>
-                  <button onClick={() => setShowDiffView((v) => !v)} className="font-mono text-xs text-brass hover:text-brass-light mt-2 underline">
-                    {showDiffView ? "Hide diff" : "Show diff (original vs edited)"}
-                  </button>
-                  {showDiffView && (
-                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <p className="font-mono text-[10px] text-parchment-muted mb-1">Original (evaluated)</p>
-                        <p className="font-mono text-[11px] text-parchment-muted whitespace-pre-wrap max-h-40 overflow-y-auto">{originalTranscript}</p>
-                      </div>
-                      <div>
-                        <p className="font-mono text-[10px] text-parchment-muted mb-1">Your edited version</p>
-                        <p className="font-mono text-[11px] text-parchment whitespace-pre-wrap max-h-40 overflow-y-auto">{transcript}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-              <div className="flex gap-3 mt-4">
-                <button
-                  onClick={() => {
-                    // Recompute diff vs original and commit
-                    const ratio = computeWordDiffRatio(originalTranscript, transcript)
-                    setTranscriptSignificantlyEdited(ratio > SIGNIFICANT_EDIT_THRESHOLD)
-                    setIsEditingTranscript(false)
-                    setTranscriptCommitted(true)
-                  }}
-                  disabled={!transcript.trim()}
-                  className={`btn-primary flex-1 ${!transcript.trim() ? "opacity-40 cursor-not-allowed" : ""}`}
-                >
-                  Continue to Evaluation
-                </button>
-                <button onClick={() => { setTranscript(""); setOriginalTranscript(""); setTranscriptCommitted(false) }} className="btn-ghost">
-                  Re-record
-                </button>
-              </div>
-            </div>
-          )}
+          {/* BUG 4 FIX: Removed redundant App-level transcript review screen.</think><arg_value>/
 
           {/* Analyzing notes indicator (during generation) */}
           {hasDocument && documentStatus !== "ready" && documentStatus !== "error" && milestones.length === 0 && (
@@ -1364,7 +1293,7 @@ export default function App() {
                     <h3 className="label-tag text-[10px]">What you understood well</h3>
                     <span className="font-mono text-[10px] text-verified">{combinedResult.details.filter((d) => d.covered).length} • covered</span>
                   </div>
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {combinedResult.details
                       .filter((d) => d.covered)
                       .map((detail, idx) => (
@@ -1407,7 +1336,7 @@ export default function App() {
                     <h3 className="label-tag text-[10px]">What you missed or need to revisit</h3>
                     <span className="font-mono text-[10px] text-flagged">{combinedResult.details.filter((d) => !d.covered).length} • to review</span>
                   </div>
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {combinedResult.details
                       .filter((d) => !d.covered)
                       .map((detail, idx) => (
