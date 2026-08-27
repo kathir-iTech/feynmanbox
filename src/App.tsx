@@ -269,7 +269,7 @@ function HistoryPanel({
                                 </div>
                               )}
                               <div className="mb-2">
-                                <h3 className="label-tag text-[10px] mb-1">Milestones</h3>
+                                <h3 className="label-tag text-[10px] mb-1">Key Concepts</h3>
                                 <ul className="space-y-1">
                                   {entry.milestones.map((m) => (
                                     <li key={m.id} className="font-mono text-xs text-parchment-muted truncate">• {m.text}</li>
@@ -610,7 +610,7 @@ export default function App() {
       setTimeout(() => setEvalCooldown(false), 4000)
     } catch (err: unknown) {
       if (evalId !== evalGenIdRef.current) return
-      const msg = err instanceof Error ? err.message : "We couldn't complete the analysis. Please try again."
+      const msg = err instanceof Error ? err.message : "We couldn't complete the evaluation. Please try again."
       setEvaluationError(msg)
       setCombinedResult(null)
     } finally {
@@ -1144,7 +1144,7 @@ export default function App() {
             <VoiceRecorder onTranscriptReady={handleTranscriptReady} onBack={handleBackToUpload} autoStart />
           )}
 
-          {/* BUG 4 FIX: Removed redundant App-level transcript review screen.</think><arg_value>/
+          {/* BUG 4 FIX: Removed redundant App-level transcript review screen. */}
 
           {/* Analyzing notes indicator (during generation) */}
           {hasDocument && documentStatus !== "ready" && documentStatus !== "error" && milestones.length === 0 && (
@@ -1210,7 +1210,7 @@ export default function App() {
               <div className="flex items-center gap-3 mb-2">
                 <div className={`w-2 h-2 rounded-sm ${isMastered ? "bg-verified" : combinedResult.is_gaming_attempt ? "bg-flagged" : "bg-brass"}`} />
                 <h2 className="font-serif text-xl font-semibold text-parchment">
-                  {combinedResult.is_gaming_attempt ? "Review Needed" : isMastered ? "Mastery Achieved" : "Assessment Complete"}
+                  {combinedResult.is_gaming_attempt ? "Review Needed" : isMastered ? "Mastery Achieved" : "Evaluation Complete"}
                 </h2>
               </div>
               <h3 className="label-tag mb-2">Combined Evaluation</h3>
@@ -1263,7 +1263,7 @@ export default function App() {
               {combinedResult.confidence === "low" && (
                 <div className="p-3 rounded-panel border border-brass/30 bg-brass/5 mb-4">
                   <p className="font-mono text-xs text-brass leading-relaxed">
-                    Evaluation confidence: Low — this explanation was brief or ambiguous; consider re-recording with more detail for a more reliable assessment.
+                    Evaluation confidence: Low — this explanation was brief or ambiguous; consider re-recording with more detail for a more reliable evaluation.
                   </p>
                 </div>
               )}
@@ -1440,7 +1440,7 @@ export default function App() {
 
               {!isMastered && !combinedResult.is_gaming_attempt && (
                 <p className="font-mono text-xs text-parchment-muted leading-relaxed">
-                  Keep refining your explanation. Try to link each milestone with clear cause-and-effect language so your reasoning is easy to follow.
+                  Keep refining your explanation. Try to link each concept with clear cause-and-effect language so your reasoning is easy to follow.
                 </p>
               )}
               {isMastered && (
@@ -1488,7 +1488,7 @@ export default function App() {
                     <p className="label-tag text-[10px] mb-3">Remediation — reflection only, not re-graded</p>
                     <p className="font-serif text-base text-parchment leading-relaxed border-l-2 border-flagged pl-4 py-1 mb-4">{followUpPair.remediation}</p>
                     <label htmlFor="followup-answer" className="label-tag text-[10px] mb-2 block">
-                      Your response (optional)
+                      Your answer (optional)
                     </label>
                     <textarea
                       id="followup-answer"
@@ -1541,11 +1541,11 @@ export default function App() {
                     <h3 className="font-serif text-lg font-semibold text-parchment">Reflection Saved</h3>
                   </div>
                   <p className="font-serif text-sm text-parchment leading-relaxed border-l-2 border-verified pl-4 py-1 mb-3">{followUpPair.remediation}</p>
-                  <p className="font-mono text-xs text-parchment-muted mb-2">Your response:</p>
+                  <p className="font-mono text-xs text-parchment-muted mb-2">Your answer:</p>
                   <p className="font-mono text-sm text-parchment bg-ink border border-ink-border rounded-panel p-3 whitespace-pre-wrap">{followUpAnswer}</p>
                   <p className="font-mono text-xs text-verified mt-3">Not re-graded — for your reflection only.</p>
                   <button onClick={() => setFollowUpSkipped(false)} className="font-mono text-xs text-brass hover:text-brass-light mt-3">
-                    Edit response
+                    Edit answer
                   </button>
                 </div>
               )}

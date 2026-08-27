@@ -161,15 +161,15 @@ Include exactly ${milestones.length} items in details, in same order as concepts
       throw new Error("Too many requests — please wait a moment before trying again.")
     }
     if (response.status >= 500) {
-      throw new Error(`We couldn't complete the analysis (server ${response.status}). Please try again shortly.`)
+      throw new Error(`We couldn't complete the evaluation (server ${response.status}). Please try again shortly.`)
     }
-    throw new Error("We couldn't complete the analysis. Please try again.")
+    throw new Error("We couldn't complete the evaluation. Please try again.")
   }
 
   const data = await response.json()
 
   if (!data.candidates || data.candidates.length === 0) {
-    throw new Error("We couldn't complete the analysis. Please try again.")
+    throw new Error("We couldn't complete the evaluation. Please try again.")
   }
 
   const text = data.candidates[0].content.parts[0].text
@@ -304,6 +304,6 @@ Include exactly ${milestones.length} items in details, in same order as concepts
       acousticMetrics,
     }
   } catch {
-    throw new Error("We couldn't interpret the analysis result. Please try again.")
+    throw new Error("We couldn't interpret the evaluation result. Please try again.")
   }
 }

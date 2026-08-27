@@ -605,7 +605,7 @@ export const VoiceRecorder: React.FC<{
           </div>
           <h3 className="label-tag mb-3">Microphone Input</h3>
           <p className="text-parchment-muted text-sm mb-5 leading-relaxed">
-            Explain your understanding of the milestones aloud. The system will transcribe and analyze your explanation for
+            Explain your understanding of the key concepts aloud. The system will transcribe and analyze your explanation for
             coverage and coherence.
           </p>
           {error && (
@@ -708,7 +708,6 @@ export const VoiceRecorder: React.FC<{
             <div className="w-2 h-2 bg-verified rounded-sm" />
             <h2 className="font-serif text-xl font-semibold text-parchment">Review Your Transcript</h2>
           </div>
-          <h3 className="label-tag mb-1">REVIEW YOUR TRANSCRIPT</h3>
           <p className="font-mono text-xs text-parchment-muted mb-3">Fix any errors before evaluation</p>
 
           <textarea

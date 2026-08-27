@@ -98,15 +98,15 @@ Valid subject_domain values: "technical" or "narrative". When has_teaching_conte
       throw new Error("Too many requests — please wait a moment before trying again.")
     }
     if (response.status >= 500) {
-      throw new Error(`We couldn't complete the analysis (server ${response.status}). Please try again shortly.`)
+      throw new Error(`We couldn't prepare your key concepts (server ${response.status}). Please try again shortly.`)
     }
-    throw new Error("We couldn't complete the analysis. Please try again.")
+    throw new Error("We couldn't prepare your key concepts. Please try again.")
   }
 
   const data = await response.json()
 
   if (!data.candidates || data.candidates.length === 0) {
-    throw new Error("We couldn't complete the analysis. Please try again.")
+    throw new Error("We couldn't prepare your key concepts. Please try again.")
   }
 
   const text = data.candidates[0].content.parts[0].text
@@ -194,7 +194,7 @@ Valid subject_domain values: "technical" or "narrative". When has_teaching_conte
     return {
       success: false,
       milestones: [],
-      error: "We couldn't interpret the analysis result. Please try again.",
+      error: "We couldn't interpret the result. Please try again.",
       loading: false,
     }
   }

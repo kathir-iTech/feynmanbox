@@ -115,7 +115,7 @@ export const ExportFeature: React.FC<{
       <h3 className="label-tag mb-4">Study Card Generation</h3>
 
       <p className="font-mono text-xs text-parchment-muted mb-5 leading-relaxed">
-        Save your milestones and personal explanations as study cards for later review and practice.
+        Save your key concepts and personal explanations as study cards for later review and practice.
       </p>
 
       <div className="flex gap-3 mb-4">
