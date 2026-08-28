@@ -6,8 +6,7 @@ export const VoiceRecorder: React.FC<{
   onTranscriptReady: (transcript: string, metrics?: AcousticMetrics) => void
   initialTranscript?: string
   onBack?: () => void
-  autoStart?: boolean
-}> = ({ onTranscriptReady, initialTranscript, onBack, autoStart }) => {
+}> = ({ onTranscriptReady, initialTranscript, onBack }) => {
   const [isSupported, setIsSupported] = useState<boolean>(true)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
@@ -86,15 +85,7 @@ export const VoiceRecorder: React.FC<{
     }
   }, [])
 
-  // BUG 2 FIX: Auto-start recording immediately when autoStart is true (no intermediate screen)
-  const hasAutoStartedRef = useRef(false)
-  useEffect(() => {
-    if (autoStart && isSupported && !isRecording && !isTranscribing && !hasRecording && !hasAutoStartedRef.current) {
-      hasAutoStartedRef.current = true
-      startRecording()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStart, isSupported])
+  // IDLE state: component mounts showing ready shell; mic NOT requested until user clicks "Start Recording".
 
   // Fix 2: ensure manual toggle overrides automatic default and actually starts/stops recognition during recording
   const startLiveRecognition = () => {
@@ -604,20 +595,37 @@ export const VoiceRecorder: React.FC<{
             <h2 className="font-serif text-xl font-semibold text-parchment">Voice Testimony</h2>
           </div>
           <h3 className="label-tag mb-3">Microphone Input</h3>
-          <p className="text-parchment-muted text-sm mb-5 leading-relaxed">
+          <p className="text-parchment-muted text-sm mb-3 leading-relaxed">
             Explain your understanding of the key concepts aloud. The system will transcribe and analyze your explanation for
             coverage and coherence.
           </p>
+          <p className="font-mono text-xs text-parchment-muted mb-4 leading-relaxed">
+            Press <span className="text-brass font-semibold">Start Recording</span> when you&apos;re ready — you&apos;ll be asked for microphone permission, then speak clearly.
+          </p>
+          {/* Idle waveform placeholder — same shell as active, but muted/ready */}
+          <div className="polygraph-grid rounded-panel border border-ink-border p-4 bg-ink opacity-60 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-1.5 h-1.5 bg-parchment-muted rounded-full" />
+              <span className="label-tag text-[10px]">Ready — press Start Recording to begin</span>
+            </div>
+            <svg viewBox="0 0 400 40" className="w-full h-[50px]" preserveAspectRatio="none">
+              <line x1="0" y1="20" x2="400" y2="20" stroke="#2A333D" strokeWidth="1" />
+              <line x1="0" y1="10" x2="400" y2="10" stroke="#2A333D" strokeWidth="0.5" strokeDasharray="4 4" />
+              <line x1="0" y1="30" x2="400" y2="30" stroke="#2A333D" strokeWidth="0.5" strokeDasharray="4 4" />
+              <path d="M 0 20 L 400 20" stroke="#3A4550" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeDasharray="6 4" opacity="0.6" />
+            </svg>
+          </div>
           {error && (
             <div className="mb-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
               {error}
             </div>
           )}
           <button onClick={startRecording} className="btn-primary w-full">
-            Begin Recording
+            Start Recording
           </button>
+          <p className="font-mono text-[10px] text-parchment-muted mt-2 text-center">Microphone not yet active — no capture until you press the button above.</p>
           {isLowEndDevice && (
-            <p className="font-mono text-[10px] text-parchment-muted mt-2 text-center">Live preview disabled by default on this device for performance. You can enable it below.</p>
+            <p className="font-mono text-[10px] text-parchment-muted mt-2 text-center">Live preview disabled by default on this device for performance. You can enable it during recording.</p>
           )}
         </div>
       )}

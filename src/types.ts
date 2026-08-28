@@ -37,18 +37,6 @@ export interface CoverageDetail {
   verifiable_from_source?: boolean
 }
 
-export interface CoverageResult {
-  details: CoverageDetail[]
-  coverage_score: number
-  milestones_covered?: boolean[]
-}
-
-export interface ClarityResult {
-  clarity_score: number
-  is_gaming_attempt: boolean
-  reasoning: string
-}
-
 export interface AcousticMetrics {
   wordsPerMinute: number
   pauseCount: number

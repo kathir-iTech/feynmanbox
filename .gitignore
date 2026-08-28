@@ -10,8 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.env
+.env.local
 *.local
-env*
 !.env.example
 
 # Editor directories and files
@@ -19,6 +20,7 @@ env*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj

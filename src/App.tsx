@@ -1139,9 +1139,9 @@ export default function App() {
             </div>
           )}
 
-          {/* Recording stage */}
+          {/* Recording stage — idle then active within same component */}
           {hasDocument && milestonesConfirmed && !transcript && !isEditingTranscript && (
-            <VoiceRecorder onTranscriptReady={handleTranscriptReady} onBack={handleBackToUpload} autoStart />
+            <VoiceRecorder onTranscriptReady={handleTranscriptReady} onBack={handleBackToUpload} />
           )}
 
           {/* BUG 4 FIX: Removed redundant App-level transcript review screen. */}
