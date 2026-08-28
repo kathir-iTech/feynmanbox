@@ -52,7 +52,7 @@ export async function transcribeAudio(
       } catch {}
     }
     if (response.status === 429) {
-      throw new Error("Too many requests — please wait a moment before trying again.")
+      throw new Error("Too many requests right now — this can happen if multiple devices are using the app on the same network. Please wait about a minute before trying again.")
     }
     if (response.status >= 500) {
       throw new Error(`We couldn't transcribe your audio (server ${response.status}). Please try again shortly.`)

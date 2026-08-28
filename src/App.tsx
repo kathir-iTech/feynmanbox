@@ -93,7 +93,7 @@ function DimBar({ label, score, color }: { label: string; score: number; color: 
 
 function HeaderBar({ onNewSession, onHistory, hasHistory }: { onNewSession: () => void; onHistory: () => void; hasHistory: boolean }) {
   return (
-    <div className="absolute top-0 right-0 flex items-center gap-2">
+    <div className="flex items-center gap-2 flex-shrink-0">
       <button
         onClick={onNewSession}
         aria-label="New Session"
@@ -708,9 +708,14 @@ export default function App() {
         setFollowUpPair(pair)
         setFollowUpLoading(false)
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (genId !== followUpGenIdRef.current) return
-        setFollowUpError("Follow-up unavailable — you can still review your results above.")
+        const msg = err instanceof Error ? err.message : ""
+        if (msg.includes("Too many requests")) {
+          setFollowUpError(msg)
+        } else {
+          setFollowUpError("Follow-up unavailable — you can still review your results above.")
+        }
         setFollowUpLoading(false)
       })
   }, [combinedResult, transcript, milestones, transcriptSignificantlyEdited])
@@ -727,12 +732,44 @@ export default function App() {
       const result = await checkFollowUpAnswer(missed.concept, followUpAnswer)
       if (genId !== followUpGenIdRef.current) return
       setFollowUpCheck(result)
-    } catch {
+    } catch (err: unknown) {
       if (genId !== followUpGenIdRef.current) return
-      setFollowUpCheck({ covered: false, feedback: "Could not verify the answer right now." })
+      const msg = err instanceof Error ? err.message : ""
+      if (msg.includes("Too many requests")) {
+        setFollowUpCheck({ covered: false, feedback: msg })
+      } else {
+        setFollowUpCheck({ covered: false, feedback: "Could not verify the answer right now." })
+      }
     } finally {
       if (genId === followUpGenIdRef.current) setFollowUpChecking(false)
     }
+  }
+
+  const handleRetryFollowUp = () => {
+    if (!combinedResult || !transcript) return
+    const missed = combinedResult.details.find((d) => !d.covered)
+    if (!missed) return
+    const covered = combinedResult.details.find((d) => d.covered) ?? null
+    const genId = ++followUpGenIdRef.current
+    setFollowUpLoading(true)
+    setFollowUpError(null)
+    setFollowUpPair(null)
+    generateFollowUpPair(missed.concept, covered ? covered.concept : null, getEvaluationTranscript())
+      .then((pair) => {
+        if (genId !== followUpGenIdRef.current) return
+        setFollowUpPair(pair)
+        setFollowUpLoading(false)
+      })
+      .catch((err: unknown) => {
+        if (genId !== followUpGenIdRef.current) return
+        const msg = err instanceof Error ? err.message : ""
+        if (msg.includes("Too many requests")) {
+          setFollowUpError(msg)
+        } else {
+          setFollowUpError("Follow-up unavailable — you can still review your results above.")
+        }
+        setFollowUpLoading(false)
+      })
   }
 
   const handleReset = () => {
@@ -961,9 +998,15 @@ export default function App() {
   return (
     <div className="min-h-screen bg-ink">
       <div className="max-w-3xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
-        <header className="mb-10 text-center relative">
-          <HeaderBar onNewSession={handleReset} onHistory={() => setHistoryOpen(true)} hasHistory={hasHistory} />
-          <h1 className="font-serif text-4xl sm:text-5xl font-bold text-parchment tracking-tight">FeynmanBox</h1>
+        <header className="mb-10 text-center">
+          <div className="flex items-center justify-between gap-3">
+            {/* Spacer to balance header on desktop so title stays viewport-centered while buttons have reserved space */}
+            <div className="hidden sm:block w-[88px] flex-shrink-0" aria-hidden="true" />
+            <div className="flex-1 min-w-0 text-left sm:text-center">
+              <h1 className="font-serif font-bold text-parchment tracking-tight leading-none truncate text-2xl min-[360px]:text-3xl sm:text-5xl">FeynmanBox</h1>
+            </div>
+            <HeaderBar onNewSession={handleReset} onHistory={() => setHistoryOpen(true)} hasHistory={hasHistory} />
+          </div>
           <div className="mt-3 mx-auto w-16 h-0.5 bg-brass" />
           <p className="mt-3 font-serif text-sm text-parchment-muted italic leading-relaxed max-w-xl mx-auto">
             It doesn't test what you remember. It tests if you can explain it.
@@ -979,12 +1022,10 @@ export default function App() {
 
         <main className="space-y-6">
           {/* Unobtrusive document processing status — visible once file received */}
-          {hasDocument && documentStatus !== "idle" && (
+          {hasDocument && documentStatus !== "idle" && documentStatus !== "error" && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-panel border border-ink-border bg-ink-light animate-fade-in">
               {documentStatus === "ready" ? (
                 <div className="w-2 h-2 bg-verified rounded-sm" />
-              ) : documentStatus === "error" ? (
-                <div className="w-2 h-2 bg-flagged rounded-sm" />
               ) : (
                 <div className="w-2 h-2 bg-brass rounded-full animate-pulse" />
               )}
@@ -997,18 +1038,92 @@ export default function App() {
                       ? `Notes ready${fileName ? ` — ${fileName}` : ""}`
                       : documentError || "Error processing notes"}
               </span>
-              {documentStatus === "error" && (
-                <button onClick={handleRetryContentGuard} className="ml-auto font-mono text-xs text-brass hover:text-brass-light flex-shrink-0">
-                  Try again
-                </button>
+            </div>
+          )}
+          {/* Milestone generation error — recoverable, keeps underlying upload UI visible (never blank) */}
+          {hasDocument && documentStatus === "error" && (
+            <div className="space-y-4 animate-fade-in">
+              <div className={`panel p-4 ${documentError?.includes("Too many requests") ? "border-brass/40 bg-brass/5" : "border-flagged/40 bg-flagged/10"}`}>
+                <div className="flex items-start gap-3">
+                  <div className={`w-2 h-2 rounded-sm flex-shrink-0 mt-1.5 ${documentError?.includes("Too many requests") ? "bg-brass" : "bg-flagged"}`} />
+                  <p className={`font-mono text-xs leading-relaxed flex-1 ${documentError?.includes("Too many requests") ? "text-brass" : "text-flagged"}`}>{documentError}</p>
+                </div>
+                <div className="flex gap-3 mt-4">
+                  <button onClick={handleRetryContentGuard} className="btn-primary flex-1 text-xs">
+                    Try again
+                  </button>
+                  <button onClick={handleBackToUpload} className="btn-ghost flex-1 text-xs">
+                    Back to notes
+                  </button>
+                </div>
+                {contentGuardCanOverride && (
+                  <button
+                    onClick={handleOverrideContentGuard}
+                    disabled={overrideLoading}
+                    className="mt-3 w-full font-mono text-xs text-ink bg-brass hover:bg-brass-light rounded-panel px-3 py-2 disabled:opacity-50"
+                  >
+                    {overrideLoading ? "Working..." : "Continue anyway"}
+                  </button>
+                )}
+              </div>
+              {/* Underlying UI remains visible and interactive */}
+              {uploadedDocs.length > 0 && (
+                <div className="panel p-4 space-y-3">
+                  <h3 className="label-tag mb-3">Processed Documents ({uploadedDocs.length}) — you can edit or add more</h3>
+                  <div className="space-y-2">
+                    {uploadedDocs.map((doc) => (
+                      <div key={doc.id} className="flex items-center gap-3 p-3 rounded-panel border border-ink-border bg-ink">
+                        {doc.status === "ready" ? (
+                          <div className="w-2 h-2 bg-verified rounded-sm flex-shrink-0" />
+                        ) : doc.status === "error" ? (
+                          <div className="w-2 h-2 bg-flagged rounded-sm flex-shrink-0" />
+                        ) : (
+                          <div className="w-2 h-2 bg-brass rounded-full animate-pulse flex-shrink-0" />
+                        )}
+                        <span className="font-mono text-xs text-parchment flex-1 truncate" title={doc.fileName}>
+                          {doc.fileName}
+                        </span>
+                        <span className="font-mono text-[10px] text-parchment-muted flex-shrink-0">
+                          {doc.status === "ready" ? "ready" : doc.status === "error" ? "error" : "extracting..."}
+                        </span>
+                        <button
+                          onClick={() => handleRemoveDoc(doc.id)}
+                          aria-label={`Remove ${doc.fileName}`}
+                          className="text-parchment-muted hover:text-flagged transition-colors flex-shrink-0"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {uploadedDocs.some((d) => d.status === "error" && d.error) && (
+                    <div className="space-y-1">
+                      {uploadedDocs
+                        .filter((d) => d.status === "error" && d.error)
+                        .map((d) => (
+                          <p key={d.id} className="font-mono text-[10px] text-flagged">
+                            {d.fileName}: {d.error}
+                          </p>
+                        ))}
+                    </div>
+                  )}
+                  <p className="font-mono text-[10px] text-parchment-muted">
+                    {uploadedDocs.filter((d) => d.status === "ready").length} ready
+                    {uploadedDocs.filter((d) => d.status === "extracting").length > 0
+                      ? `, ${uploadedDocs.filter((d) => d.status === "extracting").length} extracting`
+                      : ""}
+                    {uploadedDocs.filter((d) => d.status === "error").length > 0
+                      ? `, ${uploadedDocs.filter((d) => d.status === "error").length} failed`
+                      : ""}
+                  </p>
+                </div>
               )}
-              {documentStatus === "error" && contentGuardCanOverride && (
-                <button
-                  onClick={handleOverrideContentGuard}
-                  disabled={overrideLoading}
-                  className="ml-auto font-mono text-xs text-ink bg-brass hover:bg-brass-light rounded-panel px-3 py-1 flex-shrink-0 disabled:opacity-50"
-                >
-                  {overrideLoading ? "Working..." : "Continue anyway"}
+              <DocumentUpload onFileSelected={handleFileSelected} onPasteText={handlePasteText} error={null} status="idle" />
+              {uploadedDocs.filter((d) => d.status === "ready").length > 0 && (
+                <button onClick={handleContinueToRecording} className="btn-ghost w-full text-xs">
+                  Continue to Recording — {uploadedDocs.filter((d) => d.status === "ready").length} document{uploadedDocs.filter((d) => d.status === "ready").length > 1 ? "s" : ""} ready
                 </button>
               )}
             </div>
@@ -1179,24 +1294,43 @@ export default function App() {
           )}
 
           {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && evaluationError && !isEvaluating && (
-            <div className="panel p-6">
-              <div className="p-4 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
+            <div className="panel p-6 space-y-4">
+              <div className={`p-4 rounded-panel border font-mono text-xs leading-relaxed ${evaluationError.includes("Too many requests") ? "border-brass/40 bg-brass/5 text-brass" : "border-flagged/40 bg-flagged/10 text-flagged"}`}>
                 {evaluationError}
-                {evaluationError.includes("Too many requests") && <span className="block mt-2 text-[10px] opacity-80">Rate limit: 20 requests per 10 minutes. Please wait a minute before retrying.</span>}
               </div>
-              <div className="flex gap-3 mt-4">
+              <div className="flex gap-3">
                 <button
                   onClick={handleRetryEvaluation}
                   disabled={evalCooldown}
                   className={`btn-primary flex-1 ${evalCooldown ? "opacity-40 cursor-not-allowed" : ""}`}
                 >
-                  {evalCooldown ? "Please wait..." : "Try Again"}
+                  {evalCooldown ? "Please wait..." : "Try again"}
                 </button>
                 <button onClick={handleBackToTranscript} className="btn-ghost">
                   Edit Transcript
                 </button>
               </div>
-              {evalCooldown && <p className="font-mono text-[10px] text-parchment-muted mt-2">Cooling down — please wait a moment before re-evaluating.</p>}
+              {evalCooldown && <p className="font-mono text-[10px] text-parchment-muted">Cooling down — please wait a moment before re-evaluating.</p>}
+              {/* Underlying UI remains visible and interactive */}
+              <div className="pt-4 border-t border-ink-border">
+                <h3 className="label-tag text-[10px] mb-2">Your explanation (still saved — you can edit or retry)</h3>
+                <p className="font-mono text-xs text-parchment-muted bg-ink border border-ink-border rounded-panel p-3 whitespace-pre-wrap max-h-[120px] overflow-y-auto leading-relaxed">
+                  {transcript.slice(0, 800)}
+                  {transcript.length > 800 ? "…" : ""}
+                </p>
+                <div className="mt-3">
+                  <h4 className="label-tag text-[10px] mb-1">Key Concepts ({milestones.length})</h4>
+                  <ul className="space-y-1">
+                    {milestones.slice(0, 3).map((m) => (
+                      <li key={m.id} className="font-mono text-[10px] text-parchment-muted truncate">
+                        • {m.text.slice(0, 80)}
+                        {m.text.length > 80 ? "…" : ""}
+                      </li>
+                    ))}
+                    {milestones.length > 3 && <li className="font-mono text-[10px] text-parchment-muted">+{milestones.length - 3} more</li>}
+                  </ul>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1516,11 +1650,16 @@ export default function App() {
                     </div>
                     {/* Phase 10.4: supplementary micro-check result (does NOT change original score) */}
                     {followUpCheck && (
-                      <div className={`mt-3 p-3 rounded-panel border ${followUpCheck.covered ? "border-verified/40 bg-verified/5" : "border-flagged/40 bg-flagged/5"}`}>
-                        <p className={`font-mono text-xs font-bold ${followUpCheck.covered ? "text-verified" : "text-flagged"}`}>
-                          {followUpCheck.covered ? "✓ Now correctly explained" : "Still missing: see below"}
+                      <div className={`mt-3 p-3 rounded-panel border ${followUpCheck.feedback?.includes("Too many requests") ? "border-brass/40 bg-brass/5" : followUpCheck.covered ? "border-verified/40 bg-verified/5" : "border-flagged/40 bg-flagged/5"}`}>
+                        <p className={`font-mono text-xs font-bold ${followUpCheck.feedback?.includes("Too many requests") ? "text-brass" : followUpCheck.covered ? "text-verified" : "text-flagged"}`}>
+                          {followUpCheck.feedback?.includes("Too many requests") ? "Rate limited — try again shortly" : followUpCheck.covered ? "✓ Now correctly explained" : "Still missing: see below"}
                         </p>
-                        {followUpCheck.feedback && <p className="font-mono text-[11px] text-parchment-muted mt-1 leading-relaxed">{followUpCheck.feedback}</p>}
+                        {followUpCheck.feedback && <p className={`font-mono text-[11px] mt-1 leading-relaxed ${followUpCheck.feedback.includes("Too many requests") ? "text-brass" : "text-parchment-muted"}`}>{followUpCheck.feedback}</p>}
+                        {followUpCheck.feedback?.includes("Too many requests") && (
+                          <button onClick={handleCheckFollowUpAnswer} disabled={followUpChecking} className={`mt-3 btn-primary text-xs w-full ${followUpChecking ? "opacity-40 cursor-not-allowed" : ""}`}>
+                            {followUpChecking ? "Checking…" : "Try again"}
+                          </button>
+                        )}
                         <p className="font-mono text-[10px] text-parchment-muted mt-2">This is a supplementary check only — it does not change your original overall score.</p>
                       </div>
                     )}
@@ -1555,8 +1694,19 @@ export default function App() {
                 </div>
               )}
               {followUpError && !followUpLoading && !followUpSkipped && (
-                <div className="panel p-4 border border-flagged/30 bg-flagged/5">
-                  <p className="font-mono text-xs text-flagged">{followUpError}</p>
+                <div className={`panel p-4 border ${followUpError.includes("Too many requests") ? "border-brass/40 bg-brass/5" : "border-flagged/30 bg-flagged/5"}`}>
+                  <p className={`font-mono text-xs leading-relaxed ${followUpError.includes("Too many requests") ? "text-brass" : "text-flagged"}`}>{followUpError}</p>
+                  {followUpError.includes("Too many requests") && <p className="font-mono text-[10px] text-parchment-muted mt-2">You can still review your results above — this section will remain visible.</p>}
+                  <div className="flex gap-3 mt-3">
+                    {followUpError.includes("Too many requests") && (
+                      <button onClick={handleRetryFollowUp} className="btn-primary text-xs flex-1">
+                        Try again
+                      </button>
+                    )}
+                    <button onClick={() => setFollowUpSkipped(true)} className="btn-ghost text-xs flex-1">
+                      Skip for now
+                    </button>
+                  </div>
                 </div>
               )}
               {followUpSkipped && !followUpAnswer.trim() && (

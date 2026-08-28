@@ -52,6 +52,9 @@ The remediation should probe understanding of the gap. The transfer question sho
   })
 
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error("Too many requests right now — this can happen if multiple devices are using the app on the same network. Please wait about a minute before trying again.")
+    }
     throw new Error("Failed to generate follow-up question")
   }
 
@@ -119,6 +122,9 @@ Do not re-grade the whole session. Be concise and specific.`
   })
 
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error("Too many requests right now — this can happen if multiple devices are using the app on the same network. Please wait about a minute before trying again.")
+    }
     throw new Error("Failed to check answer")
   }
 

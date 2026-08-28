@@ -39,6 +39,9 @@ export const VoiceRecorder: React.FC<{
   const silenceStartRef = useRef<number | null>(null)
   const metricsIntervalRef = useRef<number | null>(null)
   const pitchSamplesRef = useRef<number[]>([])
+  // Retain last recording for rate-limit retry (same blob without re-recording)
+  const lastBlobRef = useRef<Blob | null>(null)
+  const lastMimeRef = useRef<string>("audio/webm")
   // Phase 6.4: device capability + toggle for live preview
   const [showLivePreview, setShowLivePreview] = useState<boolean>(true)
   const [isLowEndDevice, setIsLowEndDevice] = useState(false)
@@ -302,6 +305,8 @@ export const VoiceRecorder: React.FC<{
     liveFinalRef.current = ""
     chunksRef.current = []
     setPendingMetrics(null)
+    lastBlobRef.current = null
+    lastMimeRef.current = "audio/webm"
     // Reset acoustic metrics
     startTimeRef.current = Date.now()
     durationMsRef.current = 0
@@ -390,6 +395,8 @@ export const VoiceRecorder: React.FC<{
           metricsIntervalRef.current = null
         }
         const blob = new Blob(chunksRef.current, { type: mimeType })
+        lastBlobRef.current = blob
+        lastMimeRef.current = mimeType
         if (animationRef.current) {
           cancelAnimationFrame(animationRef.current)
           animationRef.current = null
@@ -523,6 +530,8 @@ export const VoiceRecorder: React.FC<{
     setLivePreview("")
     setLiveInterim("")
     setPendingMetrics(null)
+    lastBlobRef.current = null
+    lastMimeRef.current = "audio/webm"
     liveFinalRef.current = ""
     if (liveRecognitionRef.current) {
       try {
@@ -553,6 +562,38 @@ export const VoiceRecorder: React.FC<{
     totalPauseDurationRef.current = 0
     silenceStartRef.current = null
     pitchSamplesRef.current = []
+  }
+
+  const retryTranscription = async () => {
+    const blob = lastBlobRef.current
+    const mimeType = lastMimeRef.current || "audio/webm"
+    if (!blob) return
+    setError(null)
+    setIsTranscribing(true)
+    try {
+      const base64 = await blobToBase64(blob)
+      const apiMime = mimeType.split(";")[0].trim() || "audio/webm"
+      const transcript = await transcribeAudio(base64, apiMime)
+      setEditableTranscript(transcript)
+      setHasRecording(true)
+      const wordCount = transcript.trim().split(/\s+/).filter(Boolean).length
+      const durationMinutes = Math.max(0.1, durationMsRef.current / 60000)
+      const wpm = Math.round(wordCount / durationMinutes)
+      const pitchVarianceScore = computePitchVarianceScore()
+      const metrics: AcousticMetrics = {
+        wordsPerMinute: Number.isFinite(wpm) ? wpm : 0,
+        pauseCount: pauseCountRef.current,
+        totalPauseDuration: totalPauseDurationRef.current,
+        pitchVarianceScore,
+        recordingDurationMs: durationMsRef.current,
+      }
+      setPendingMetrics(metrics)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "We couldn't transcribe your audio. Please try again."
+      setError(msg)
+    } finally {
+      setIsTranscribing(false)
+    }
   }
 
   const formatTime = (s: number) => {
@@ -621,9 +662,14 @@ export const VoiceRecorder: React.FC<{
             </svg>
           </div>
           {error && (
-            <div className="mb-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
+            <div className={`mb-4 p-3 rounded-panel border font-mono text-xs leading-relaxed ${error.includes("Too many requests") ? "border-brass/40 bg-brass/10 text-brass" : "border-flagged/40 bg-flagged/10 text-flagged"}`}>
               {error}
             </div>
+          )}
+          {error?.includes("Too many requests") && lastBlobRef.current && (
+            <button onClick={retryTranscription} className="btn-primary w-full mb-3">
+              Try again (same recording)
+            </button>
           )}
           <button onClick={startRecording} className="btn-primary w-full">
             Start Recording
@@ -762,10 +808,10 @@ export const VoiceRecorder: React.FC<{
         </div>
       )}
 
-      {!isRecording && !isTranscribing && !hasRecording && error && (
+      {!isRecording && !isTranscribing && !hasRecording && error && !error.includes("Too many requests") && (
         <div className="mt-4">
           <button onClick={handleReset} className="btn-ghost w-full">
-            Try again
+            Clear error
           </button>
         </div>
       )}
