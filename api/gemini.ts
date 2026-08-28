@@ -126,6 +126,19 @@ export default async function handler(req: any, res: any) {
       return
     }
 
+    const allowedOrigins = ["https://feynmanbox.vercel.app", "http://localhost:5173"]
+    const origin = req.headers.origin as string | undefined
+    if (origin && !allowedOrigins.includes(origin)) {
+      res.status(403).json({ error: "Forbidden origin" })
+      return
+    }
+    if (origin) res.setHeader("Access-Control-Allow-Origin", origin)
+    res.setHeader("Vary", "Origin")
+    if (req.method === "OPTIONS") {
+      res.status(204).end()
+      return
+    }
+
     // Rate limiting check
     const clientIp = getClientIp(req)
     const rateLimited = isRateLimited(clientIp)

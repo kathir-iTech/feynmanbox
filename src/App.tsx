@@ -439,8 +439,14 @@ export default function App() {
   const persistHistory = (entries: HistoryEntry[]) => {
     try {
       localStorage.setItem("feynmanbox_history", JSON.stringify(entries))
-    } catch {
-      // ignore
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "QuotaExceededError") {
+        const pruned = entries.slice(-10)
+        try {
+          localStorage.setItem("feynmanbox_history", JSON.stringify(pruned))
+          alert("Your history storage was full, so older sessions were removed to make room. Consider exporting your history to keep a backup.")
+        } catch {}
+      }
     }
   }
 
@@ -704,9 +710,8 @@ export default function App() {
       })
       .catch(() => {
         if (genId !== followUpGenIdRef.current) return
-        setFollowUpError(null)
+        setFollowUpError("Follow-up unavailable — you can still review your results above.")
         setFollowUpLoading(false)
-        // Fail silently — follow-up is optional
       })
   }, [combinedResult, transcript, milestones, transcriptSignificantlyEdited])
 
@@ -1549,9 +1554,9 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {followUpError && !followUpLoading && !followUpPair && !followUpSkipped && (
-                <div className="panel p-4">
-                  <p className="font-mono text-xs text-parchment-muted">Follow-up questions unavailable.</p>
+              {followUpError && !followUpLoading && !followUpSkipped && (
+                <div className="panel p-4 border border-flagged/30 bg-flagged/5">
+                  <p className="font-mono text-xs text-flagged">{followUpError}</p>
                 </div>
               )}
               {followUpSkipped && !followUpAnswer.trim() && (

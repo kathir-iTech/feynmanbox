@@ -69,19 +69,22 @@ export const VoiceRecorder: React.FC<{
     setShowLivePreview(!lowEnd)
     console.log(`[VoiceRecorder] Device check: hardwareConcurrency=${hardwareConcurrency} isMobile=${isMobile} lowEnd=${lowEnd} showLivePreview default=${!lowEnd}`)
     return () => {
+      if (mediaRecorderRef.current?.state === "recording") {
+        try {
+          mediaRecorderRef.current.stop()
+        } catch {}
+      }
       if (timerRef.current) window.clearInterval(timerRef.current)
       if (metricsIntervalRef.current) window.clearInterval(metricsIntervalRef.current)
       if (animationRef.current) cancelAnimationFrame(animationRef.current)
-      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop())
-      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-        audioContextRef.current.close().catch(() => {})
-      }
       if (liveRecognitionRef.current) {
         try {
           liveRecognitionRef.current.stop()
         } catch {}
         liveRecognitionRef.current = null
       }
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop())
+      if (audioContextRef.current?.state !== "closed") audioContextRef.current?.close().catch(() => {})
     }
   }, [])
 
@@ -355,6 +358,8 @@ export const VoiceRecorder: React.FC<{
       let mimeType = "audio/webm"
       if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
         mimeType = "audio/webm;codecs=opus"
+      } else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
+        mimeType = "audio/ogg;codecs=opus"
       } else if (MediaRecorder.isTypeSupported("audio/webm")) {
         mimeType = "audio/webm"
       } else if (MediaRecorder.isTypeSupported("audio/mp4")) {

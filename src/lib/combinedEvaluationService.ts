@@ -133,6 +133,38 @@ Include exactly ${milestones.length} items in details, in same order as concepts
     ],
     generationConfig: {
       responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          coverage_score: { type: "NUMBER" },
+          factual_accuracy_score: { type: "NUMBER" },
+          reasoning_quality_score: { type: "NUMBER" },
+          clarity_score: { type: "NUMBER" },
+          is_gaming_attempt: { type: "BOOLEAN" },
+          confidence: { type: "STRING", enum: ["high", "moderate", "low"] },
+          subject_domain: { type: "STRING", enum: ["technical", "narrative"] },
+          reasoning: { type: "STRING" },
+          summary: { type: "STRING" },
+          details: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                concept: { type: "STRING" },
+                sub_score: { type: "NUMBER" },
+                max_score: { type: "NUMBER" },
+                is_factually_correct: { type: "BOOLEAN" },
+                verifiable_from_source: { type: "BOOLEAN" },
+                feedback: { type: "STRING" },
+                reasoning_feedback: { type: "STRING" },
+                source_reference: { type: "STRING" },
+              },
+              required: ["concept", "sub_score", "max_score", "is_factually_correct", "feedback"],
+            },
+          },
+        },
+        required: ["coverage_score", "clarity_score", "is_gaming_attempt", "details"],
+      },
       temperature: 0.2,
     },
   }

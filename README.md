@@ -12,7 +12,7 @@ Students upload or paste lecture notes. The app extracts **5–7** key learning 
 - **Clarity** — Was the explanation coherent, with logical connectors (`because`, `therefore`, `this means`) rather than buzzword dumping?
 - **Gaming Detection** — Flags attempts that list terms without sentence structure or logical flow.
 
-Mastery is verified at **final score ≥ 80** (weighted: 60% coverage + 40% clarity; clarity is forced to 0 if flagged as gaming). Final score and per-concept feedback are shown in a unified results panel.
+Mastery is verified at **final score ≥ 80** (weighted: 40% coverage + 20% factual accuracy + 20% reasoning quality + 20% clarity; clarity and reasoning are forced to 0 if flagged as gaming). Final score and per-concept feedback are shown in a unified results panel.
 
 ## How It Works — Current Flow
 

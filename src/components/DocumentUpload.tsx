@@ -60,9 +60,10 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
       </div>
       <h3 className="label-tag mb-4">Lecture Notes Input</h3>
 
-      {/* Upload zone - accessible button */}
-      <button
-        type="button"
+      {/* Upload zone - accessible drop zone (div role=button to avoid invalid nested interactive) */}
+      <div
+        role="button"
+        tabIndex={0}
         aria-label="Upload document — PDF, DOCX or TXT, maximum 10MB. Click to browse or drag and drop."
         onDragOver={(e) => {
           e.preventDefault()
@@ -76,16 +77,6 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
           dragOver ? "border-brass bg-brass/5" : "border-ink-border bg-ink hover:border-brass/50 hover:bg-ink-light"
         }`}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          accept={acceptTypes}
-          className="sr-only"
-          tabIndex={-1}
-          aria-hidden="true"
-          onChange={(e) => handleFiles(e.target.files)}
-          onClick={(e) => e.stopPropagation()}
-        />
         <span className="flex flex-col items-center gap-3">
           <span className="w-10 h-10 rounded-panel border border-ink-border bg-ink-light flex items-center justify-center">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-parchment-muted" aria-hidden="true">
@@ -101,7 +92,17 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({ onFileSelected, 
           </span>
           <span className="font-mono text-[10px] text-parchment-muted block">Maximum file size: 10MB</span>
         </span>
-      </button>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={acceptTypes}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(e) => handleFiles(e.target.files)}
+        onClick={(e) => e.stopPropagation()}
+      />
 
       {(fileError || error) && (
         <div role="alert" className="mt-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs">
