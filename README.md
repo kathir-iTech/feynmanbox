@@ -1,138 +1,128 @@
+<div align="center">
+
 # FeynmanBox
 
-It doesn't test what you remember. It tests if you can explain it.
+### *It doesn't test what you remember. It tests if you can explain it.*
 
-Voice-driven active-learning app that catches the illusion of competence — when reciting keywords feels like understanding, but isn't. Paste lecture notes, explain them out loud, and get an oral-examination style evaluation that detects keyword gaming, shallow coverage, and incoherent reasoning.
+[![Typing SVG](https://readme-typing-svg.demolab.com/?font=Fira+Code&size=22&duration=3000&pause=800&center=true&vCenter=true&width=600&lines=Catches+keyword-dumping.;Scores+real+understanding.;Built+with+Gemini+%2B+zero+backend.)](https://git.io/typing-svg)
 
-## Core Concept
+[![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-red)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-feynmanbox.vercel.app-blue?logo=vercel)](https://feynmanbox.vercel.app)
+[![Built With](https://img.shields.io/badge/Built%20With-React%20%7C%20TypeScript%20%7C%20Vite%20%7C%20Gemini-61DAFB)](https://react.dev)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen)](https://feynmanbox.vercel.app)
 
-Students upload or paste lecture notes. The app extracts **5–7** key learning milestones via AI, then requires the student to explain those concepts **out loud** via voice. Evaluation scores:
+</div>
 
-- **Coverage** — Which milestones were substantively addressed?
-- **Clarity** — Was the explanation coherent, with logical connectors (`because`, `therefore`, `this means`) rather than buzzword dumping?
-- **Gaming Detection** — Flags attempts that list terms without sentence structure or logical flow.
+---
 
-Mastery is verified at **final score ≥ 80** (weighted: 40% coverage + 20% factual accuracy + 20% reasoning quality + 20% clarity; clarity and reasoning are forced to 0 if flagged as gaming). Final score and per-concept feedback are shown in a unified results panel.
+Most study tools ask *"did you read this?"* FeynmanBox asks a harder question:
+**"can you actually explain it?"** Reciting keywords feels like understanding.
+It usually isn't. FeynmanBox runs an adversarial oral examination on your own
+voice — and it is built to catch you when you're bluffing.
 
-## How It Works — Current Flow
+---
 
-1. **Upload / Paste Document** — Drop a PDF, DOCX, or TXT, or paste notes directly. File parsing runs client-side (see below).
-2. **Background Milestone Generation** — A single Gemini call extracts 5–7 substantive milestones as JSON. UI stays responsive; progress is shown unobtrusively.
-3. **Voice Recording** — `MediaRecorder` captures audio with a live waveform (Web Audio API `AnalyserNode`) and an approximate live caption preview (Web Speech API, visual-only, discarded after recording).
-4. **Stop → Transcription** — Audio is encoded to base64 and sent to Gemini via `inline_data` for word-for-word transcription (not the browser's Web Speech API final transcript).
-5. **Editable Transcript Review** — User can correct transcription errors, then confirms.
-6. **Single Combined Evaluation** — One structured Gemini call returns coverage, clarity, gaming flag, summary, and per-concept feedback together (see Architecture).
-7. **Unified Results** — Summary, final score (0–100), covered/missed concepts with specific feedback, clarity score, and flagged warning if applicable. Transcript is collapsible. Mastery export unlocks at ≥ 80.
+## The Problem
 
-History is stored in `localStorage`. Re-attempting the same material is fingerprinted for progress tracking (see Phase 3 feature).
+Students rehearse terminology and mistake fluency for comprehension — the
+classic *illusion of competence*. A transcript full of correct-sounding words
+can carry zero actual understanding, and no flashcard app is equipped to tell
+the difference. FeynmanBox exists to make that gap visible, auditable, and
+hard to game.
+
+---
+
+## How It Works
+
+You supply material. The system extracts what you must be able to explain,
+listens to you explain it out loud, and scores the explanation against the
+source — not against a memorized answer key.
+
+```
+┌─────────┐   ┌────────────┐   ┌─────────┐   ┌────────────┐   ┌──────────────┐   ┌────────┐   ┌────────────┐
+│ Upload  │ → │ Milestones │ → │ Record  │ → │ Transcribe │ → │  Evaluate    │ → │ Results│ → │  Follow-up │
+│ notes / │   │ 5–7 key    │   │ voice   │   │ audio →    │   │ 4-dimension  │   │ score +│   │ remediation│
+│ PDF/DOCX│   │ concepts   │   │ explain │   │ text       │   │ traceable    │   │ feedback│   │ + transfer │
+└─────────┘   └────────────┘   └─────────┘   └────────────┘   └──────────────┘   └────────┘   └────────────┘
+```
+
+Every step after upload runs in your browser. The only network call is a
+single server-held proxy to Gemini — there is no database, no accounts, and no
+backend of our own.
+
+---
+
+## What Makes This Different
+
+- **Anti-gaming / bluff detection.** A keyword dump — terms strung together
+  with no causal structure — is explicitly flagged. The system looks for
+  *because*, *therefore*, and *this means*, not just the presence of vocabulary.
+- **4-dimension, traceable scoring.** Each concept is scored on
+  **Coverage · Factual Accuracy · Reasoning Quality · Clarity**, and the
+  coverage total is the literal sum of per-concept sub-scores. The number is
+  inspectable, not a black box.
+- **Source-grounded factual checking.** Claims are checked against your own
+  uploaded material. Confidently wrong answers are capped and flagged as
+  factually incorrect — fluency does not buy you points.
+- **Single-call architecture.** Coverage, clarity, gaming detection, and
+  follow-up generation are collapsed into one structured model call where
+  possible, minimizing latency and quota on the free tier.
+
+---
 
 ## Tech Stack
 
-- **Frontend**: React + Vite + TypeScript
-- **Styling**: Tailwind CSS
-- **AI**: Google `gemini-flash-lite-latest` via Google AI Studio API (proxied server-side)
-- **Storage**: Browser `localStorage` only (no database)
-- **Deployment**: Vercel
+| Layer | Technology |
+|---|---|
+| Frontend | React 19 · TypeScript · Vite |
+| Styling | Tailwind CSS |
+| AI | Google `gemini-flash-lite-latest` (via serverless proxy) |
+| Audio / Parsing | Web Audio API · `MediaRecorder` · `pdfjs-dist` · `mammoth` (Web Worker) |
+| Storage | Browser `localStorage` (no backend) |
+| Hosting | Vercel (static + one serverless function) |
 
-## Architecture — Deliberate Engineering Choices
+---
 
-**Single structured Gemini call.** Coverage scoring, clarity analysis, and gaming detection return together in one JSON response — reducing what would otherwise be 3 sequential API calls into 1, cutting latency and quota usage on the free tier.
+## Live Demo
 
-**Client-side pipeline.** Document parsing (`pdfjs-dist` for PDF, `mammoth` for DOCX), audio capture (`MediaRecorder`), and waveform visualization (Web Audio API `AnalyserNode`) all run entirely in the browser — no server infrastructure beyond a minimal API-key-holding proxy function.
+**The fastest way to understand FeynmanBox is to use it:**
+**[feynmanbox.vercel.app](https://feynmanbox.vercel.app)**
 
-**Server-side API key proxy.** The Gemini API key is never bundled to client JS. A Vercel serverless function at `/api/gemini.ts` reads `GEMINI_API_KEY` from a server-only env var (no `VITE_` prefix) and forwards the request to `generativelanguage.googleapis.com`. Client code calls `/api/gemini` with `{ model, payload }`. See `api/gemini.ts`, `src/lib/milestoneService.ts`, `src/lib/combinedEvaluationService.ts`, `src/lib/transcriptionService.ts`.
+For an instant, network-free walkthrough, append `?demo=true` to the URL — the
+app runs entirely on offline fixtures, no API key or microphone required.
 
-## Getting Started
+> Best experienced in Chrome or Edge (microphone + live caption support).
 
-```bash
-npm install
-npm run dev
-```
+---
 
-## Environment Variables
+## Validated Results
 
-**Server-side (required):** `GEMINI_API_KEY` — set in Vercel Project Settings → Environment Variables (NOT prefixed with `VITE_`, never exposed to the client). For local dev with `vercel dev`, set it in `.env` or your shell:
+This isn't a claim about what the model *should* do — it's what the adversarial
+test harness **actually measured** against seven labeled explanations (BST
+reference material, `npm run test:evaluation`):
 
-```bash
-# .env (local, gitignored)
-GEMINI_API_KEY=your_gemini_api_key_here
-```
+| Input | Coverage | Clarity | Final | Gaming? |
+|---|---|---|---|---|
+| Genuine, well-explained | 88 | 82 | **86** | no |
+| Keyword dump | 12 | 9 | **7** | **yes** |
+| Confident but wrong | 10 | 45 | **24** | no* |
+| Memorized verbatim | 75 | 58 | **68** | no |
+| Fluent nonsense | 8 | 76 | **35** | no |
 
-`VITE_GEMINI_API_KEY` is **not used** and must not be set — it would expose the key in the client bundle. See `.env.example`.
+\* Confident-wrong is caught by factual-accuracy capping, not the gaming flag —
+proving the score reflects *correctness*, not delivery. Genuine explanations
+consistently land in the **70–90+** range; gaming attempts score **under 20**.
+**7/7 harness cases pass.**
 
-## Deployment to Vercel
+---
 
-### Prerequisites
+## License & Usage
 
-- GitHub account with the FeynmanBox repo
-- Vercel account (free at vercel.com)
-- Gemini API key from Google AI Studio
+This repository is public for **transparency and demonstration purposes only**.
+All rights reserved — see [LICENSE](LICENSE) for details. This code may not be
+copied, modified, redistributed, or used to create derivative works without
+explicit written permission.
 
-### Step 1: Push to GitHub
-
-```bash
-git add -A
-git commit -m "feat: complete FeynmanBox implementation"
-git branch -M main
-git remote add origin git@github.com:YOUR_USERNAME/feynmanbox.git
-git push -u origin main
-```
-
-### Step 2: Connect to Vercel
-
-1. Go to https://vercel.com and create a new account (free)
-2. Click "Add New..." → "Import Project"
-3. Select "GitHub" and choose the feynmanbox repo
-4. Vercel will auto-detect it's a Vite + React project
-
-### Step 3: Configure Environment Variables
-
-In the Vercel dashboard, go to your project → Settings → Environment Variables:
-
-- Add variable: `GEMINI_API_KEY`
-- Value: Your Google AI Studio API key
-- Environment: Production, Preview, Development
-- Click "Save"
-
-Do **not** use `VITE_GEMINI_API_KEY`.
-
-### Step 4: Deploy
-
-1. Go to the "Deployments" tab
-2. Click "Trigger Deploy" → "Deploy Now"
-3. Wait for the build to complete (1–3 minutes)
-
-### Step 5: Enable Auto-Deploy
-
-Vercel will automatically redeploy on every push to the `main` branch.
-
-### Step 6: Verify the Deploy
-
-Once deployed, Vercel will provide a URL like `https://feynmanbox.vercel.app`
-
-- Test the full flow: upload/paste document → background milestone generation → voice recording with waveform → stop → review transcript → single combined evaluation → unified results
-- Verify mastery badge appears at score **≥ 80**
-- Confirm no API key appears in the client bundle (search built JS for `generativelanguage` — it should only appear in `/api/gemini.ts` on the server, client uses `/api/gemini`)
-- Test History and "Download Study Cards" (study cards export per-milestone feedback keyed by `milestone.id`)
-
-## Project Structure Highlights
-
-- `api/gemini.ts` — Vercel serverless proxy (server-only key)
-- `src/lib/fileExtractor.ts` — lazy-loaded PDF/DOCX parsing (dynamically imported only on file upload)
-- `src/lib/milestoneService.ts` — 5–7 milestone generation via proxy
-- `src/lib/transcriptionService.ts` — `MediaRecorder` → base64 → Gemini `inline_data` transcription via proxy
-- `src/lib/combinedEvaluationService.ts` — single-call coverage + clarity + gaming evaluation
-- `src/components/DocumentUpload.tsx` — accessible drop zone (`<button>` with keyboard handling, `sr-only` file input)
-- `src/components/VoiceRecorder.tsx` — recording, waveform (respects `prefers-reduced-motion`), live preview (Web Speech API, discarded)
-- `src/App.tsx` — generation/evaluation tokens guard against stale race conditions, lazy file extraction, 10MB file validation
-
-## Zero Cost Constraints
-
-- No paid APIs — `gemini-flash-lite-latest` has free tier; single-call architecture minimizes quota use
-- No paid hosting — Vercel free tier
-- No database — Browser `localStorage` only
-- No server beyond proxy — Document parsing, audio capture, waveform all run in-browser; voice transcription and evaluation use Gemini via the proxy
-
-## License
-
-MIT
+For the security posture, see [SECURITY.md](SECURITY.md). For architecture,
+test harness data, and known limitations, see
+[docs/TECHNICAL_NOTES.md](docs/TECHNICAL_NOTES.md).
