@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { transcribeAudio, blobToBase64 } from "../lib/transcriptionService"
+import { RateLimitAlert } from "./RateLimitAlert"
 import type { AcousticMetrics } from "../types"
 
 export const VoiceRecorder: React.FC<{
@@ -91,7 +92,7 @@ export const VoiceRecorder: React.FC<{
     }
   }, [])
 
-  // IDLE state: component mounts showing ready shell; mic NOT requested until user clicks "Start Recording".
+  // IDLE state: component mounts showing ready shell; mic NOT requested until user clicks "Start Recording Capture".
 
   // Fix 2: ensure manual toggle overrides automatic default and actually starts/stops recognition during recording
   const startLiveRecognition = () => {
@@ -648,11 +649,12 @@ export const VoiceRecorder: React.FC<{
           <p className="font-mono text-xs text-parchment-muted mb-4 leading-relaxed">
             Press <span className="text-brass font-semibold">Start Recording</span> when you&apos;re ready — you&apos;ll be asked for microphone permission, then speak clearly.
           </p>
-          {/* Idle waveform placeholder — same shell as active, but muted/ready */}
+           {/* Idle waveform placeholder — same shell as active, but muted/ready.
+              Mic is NOT requested and MediaRecorder is NOT instantiated here. */}
           <div className="polygraph-grid rounded-panel border border-ink-border p-4 bg-ink opacity-60 mb-4">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-1.5 h-1.5 bg-parchment-muted rounded-full" />
-              <span className="label-tag text-[10px]">Ready — press Start Recording to begin</span>
+              <span className="label-tag text-[10px]">System Ready — Press button to initiate active recording</span>
             </div>
             <svg viewBox="0 0 400 40" className="w-full h-[50px]" preserveAspectRatio="none">
               <line x1="0" y1="20" x2="400" y2="20" stroke="#2A333D" strokeWidth="1" />
@@ -661,18 +663,23 @@ export const VoiceRecorder: React.FC<{
               <path d="M 0 20 L 400 20" stroke="#3A4550" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeDasharray="6 4" opacity="0.6" />
             </svg>
           </div>
-          {error && (
-            <div className={`mb-4 p-3 rounded-panel border font-mono text-xs leading-relaxed ${error.includes("Too many requests") ? "border-brass/40 bg-brass/10 text-brass" : "border-flagged/40 bg-flagged/10 text-flagged"}`}>
+          {error && !error.includes("Too many requests") && (
+            <div className="mb-4 p-3 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs leading-relaxed">
               {error}
             </div>
           )}
+          {/* 429 rate-limit: dark-red alert with Retry Request; the captured audio blob is retained in lastBlobRef so no re-recording is needed */}
           {error?.includes("Too many requests") && lastBlobRef.current && (
-            <button onClick={retryTranscription} className="btn-primary w-full mb-3">
-              Try again (same recording)
-            </button>
+            <div className="mb-4">
+              <RateLimitAlert onRetry={retryTranscription} />
+            </div>
           )}
-          <button onClick={startRecording} className="btn-primary w-full">
-            Start Recording
+          {/* Two-click flow verification:
+              1) Click "Start Recording — N concepts" on the milestone review panel (sets milestonesConfirmed, mounts this component in IDLE).
+              2) Click "Start Recording Capture" below — this is the ONLY action that triggers getUserMedia + MediaRecorder.start().
+              => exactly 2 distinct click inputs from concept review to live audio spectrum. */}
+          <button onClick={startRecording} className="btn-brass-sharp w-full">
+            Start Recording Capture
           </button>
           <p className="font-mono text-[10px] text-parchment-muted mt-2 text-center">Microphone not yet active — no capture until you press the button above.</p>
           {isLowEndDevice && (

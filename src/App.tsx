@@ -2,6 +2,7 @@ import "./index.css"
 import { DocumentUpload } from "./components/DocumentUpload"
 import { VoiceRecorder } from "./components/VoiceRecorder"
 import { ExportFeature } from "./components/ExportFeature"
+import { RateLimitAlert } from "./components/RateLimitAlert"
 import type { Milestone, CoverageDetail, SubjectDomain, AcousticMetrics } from "./types"
 import { useState, useEffect, useRef } from "react"
 import { generateMilestones } from "./lib/milestoneService"
@@ -999,11 +1000,10 @@ export default function App() {
     <div className="min-h-screen bg-ink">
       <div className="max-w-3xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
         <header className="mb-10 text-center">
-          <div className="flex items-center justify-between gap-3">
-            {/* Spacer to balance header on desktop so title stays viewport-centered while buttons have reserved space */}
-            <div className="hidden sm:block w-[88px] flex-shrink-0" aria-hidden="true" />
+          {/* Flexible container — replaces absolute/spacer balancing so the title clears the top-right toolbar on 320–414px viewports */}
+          <div className="flex flex-row justify-between items-center w-full gap-3">
             <div className="flex-1 min-w-0 text-left sm:text-center">
-              <h1 className="font-serif font-bold text-parchment tracking-tight leading-none truncate text-2xl min-[360px]:text-3xl sm:text-5xl">FeynmanBox</h1>
+              <h1 className="font-serif font-bold text-parchment tracking-tight leading-none truncate text-xl sm:text-2xl md:text-3xl">FeynmanBox</h1>
             </div>
             <HeaderBar onNewSession={handleReset} onHistory={() => setHistoryOpen(true)} hasHistory={hasHistory} />
           </div>
@@ -1043,29 +1043,33 @@ export default function App() {
           {/* Milestone generation error — recoverable, keeps underlying upload UI visible (never blank) */}
           {hasDocument && documentStatus === "error" && (
             <div className="space-y-4 animate-fade-in">
-              <div className={`panel p-4 ${documentError?.includes("Too many requests") ? "border-brass/40 bg-brass/5" : "border-flagged/40 bg-flagged/10"}`}>
-                <div className="flex items-start gap-3">
-                  <div className={`w-2 h-2 rounded-sm flex-shrink-0 mt-1.5 ${documentError?.includes("Too many requests") ? "bg-brass" : "bg-flagged"}`} />
-                  <p className={`font-mono text-xs leading-relaxed flex-1 ${documentError?.includes("Too many requests") ? "text-brass" : "text-flagged"}`}>{documentError}</p>
+              {documentError?.includes("Too many requests") ? (
+                <RateLimitAlert onRetry={handleRetryContentGuard} />
+              ) : (
+                <div className="panel p-4 border-flagged/40 bg-flagged/10">
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 rounded-sm bg-flagged flex-shrink-0 mt-1.5" />
+                    <p className="font-mono text-xs leading-relaxed text-flagged flex-1">{documentError}</p>
+                  </div>
+                  <div className="flex gap-3 mt-4">
+                    <button onClick={handleRetryContentGuard} className="btn-primary flex-1 text-xs">
+                      Try again
+                    </button>
+                    <button onClick={handleBackToUpload} className="btn-ghost flex-1 text-xs">
+                      Back to notes
+                    </button>
+                  </div>
+                  {contentGuardCanOverride && (
+                    <button
+                      onClick={handleOverrideContentGuard}
+                      disabled={overrideLoading}
+                      className="mt-3 w-full font-mono text-xs text-ink bg-brass hover:bg-brass-light rounded-panel px-3 py-2 disabled:opacity-50"
+                    >
+                      {overrideLoading ? "Working..." : "Continue anyway"}
+                    </button>
+                  )}
                 </div>
-                <div className="flex gap-3 mt-4">
-                  <button onClick={handleRetryContentGuard} className="btn-primary flex-1 text-xs">
-                    Try again
-                  </button>
-                  <button onClick={handleBackToUpload} className="btn-ghost flex-1 text-xs">
-                    Back to notes
-                  </button>
-                </div>
-                {contentGuardCanOverride && (
-                  <button
-                    onClick={handleOverrideContentGuard}
-                    disabled={overrideLoading}
-                    className="mt-3 w-full font-mono text-xs text-ink bg-brass hover:bg-brass-light rounded-panel px-3 py-2 disabled:opacity-50"
-                  >
-                    {overrideLoading ? "Working..." : "Continue anyway"}
-                  </button>
-                )}
-              </div>
+              )}
               {/* Underlying UI remains visible and interactive */}
               {uploadedDocs.length > 0 && (
                 <div className="panel p-4 space-y-3">
@@ -1295,22 +1299,28 @@ export default function App() {
 
           {hasDocument && transcript && !isEditingTranscript && milestones.length > 0 && evaluationError && !isEvaluating && (
             <div className="panel p-6 space-y-4">
-              <div className={`p-4 rounded-panel border font-mono text-xs leading-relaxed ${evaluationError.includes("Too many requests") ? "border-brass/40 bg-brass/5 text-brass" : "border-flagged/40 bg-flagged/10 text-flagged"}`}>
-                {evaluationError}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleRetryEvaluation}
-                  disabled={evalCooldown}
-                  className={`btn-primary flex-1 ${evalCooldown ? "opacity-40 cursor-not-allowed" : ""}`}
-                >
-                  {evalCooldown ? "Please wait..." : "Try again"}
-                </button>
-                <button onClick={handleBackToTranscript} className="btn-ghost">
-                  Edit Transcript
-                </button>
-              </div>
-              {evalCooldown && <p className="font-mono text-[10px] text-parchment-muted">Cooling down — please wait a moment before re-evaluating.</p>}
+              {evaluationError.includes("Too many requests") ? (
+                <RateLimitAlert onRetry={handleRetryEvaluation} retrying={evalCooldown} />
+              ) : (
+                <>
+                  <div className="p-4 rounded-panel border border-flagged/40 bg-flagged/10 text-flagged font-mono text-xs leading-relaxed">
+                    {evaluationError}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleRetryEvaluation}
+                      disabled={evalCooldown}
+                      className={`btn-primary flex-1 ${evalCooldown ? "opacity-40 cursor-not-allowed" : ""}`}
+                    >
+                      {evalCooldown ? "Please wait..." : "Try again"}
+                    </button>
+                    <button onClick={handleBackToTranscript} className="btn-ghost">
+                      Edit Transcript
+                    </button>
+                  </div>
+                  {evalCooldown && <p className="font-mono text-[10px] text-parchment-muted">Cooling down — please wait a moment before re-evaluating.</p>}
+                </>
+              )}
               {/* Underlying UI remains visible and interactive */}
               <div className="pt-4 border-t border-ink-border">
                 <h3 className="label-tag text-[10px] mb-2">Your explanation (still saved — you can edit or retry)</h3>

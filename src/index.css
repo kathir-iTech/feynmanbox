@@ -23,6 +23,13 @@
     @apply hover:border-brass hover:text-parchment;
   }
 
+  /* Sharp-cornered brass action button (no border radius) used for explicit gated recording start */
+  .btn-brass-sharp {
+    @apply bg-brass text-ink font-semibold px-6 py-2 transition-colors;
+    @apply hover:bg-brass-light active:bg-brass-dark;
+    border-radius: 0;
+  }
+
   .score-display {
     @apply font-mono text-4xl font-bold text-brass tracking-tight;
   }
